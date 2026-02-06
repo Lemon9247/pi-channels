@@ -8,9 +8,10 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { getSwarmState, getParentClient } from "./state.js";
-import { serialize } from "./protocol.js";
-import type { SenderInfo } from "./server.js";
+import { getSwarmState, getParentClient } from "../core/state.js";
+import { getIdentity } from "../core/identity.js";
+import { serialize } from "../transport/protocol.js";
+import type { SenderInfo } from "../core/router.js";
 
 export function registerInstructTool(pi: ExtensionAPI): void {
     pi.registerTool({
@@ -52,7 +53,7 @@ export function registerInstructTool(pi: ExtensionAPI): void {
                 };
             }
 
-            // Queen mode — we own the server, send instruct through it
+            // We own the server — send instruct through it
             const server = state.server;
             const clients = server.getClients();
 
@@ -64,14 +65,15 @@ export function registerInstructTool(pi: ExtensionAPI): void {
                 swarm: params.swarm,
             };
 
-            // Queen sender identity for routing (no socket needed)
-            const queenSender: SenderInfo = {
-                name: "queen",
-                role: "queen",
-                swarm: undefined,
+            // Use identity for sender info instead of hardcoded "queen"
+            const identity = getIdentity();
+            const sender: SenderInfo = {
+                name: identity.name,
+                role: identity.role,
+                swarm: identity.swarm,
             };
 
-            let recipients = server.getRecipients(queenSender, msg);
+            let recipients = server.getRecipients(sender, msg);
 
             // If targeting a specific agent that's not on this socket,
             // forward to all coordinators — they'll check their own agents
@@ -104,9 +106,9 @@ export function registerInstructTool(pi: ExtensionAPI): void {
 
             // Send to each recipient
             const relayed = {
-                from: "queen",
-                fromRole: "queen" as const,
-                fromSwarm: undefined,
+                from: identity.name,
+                fromRole: identity.role,
+                fromSwarm: identity.swarm,
                 message: msg,
             };
             const data = serialize(relayed);

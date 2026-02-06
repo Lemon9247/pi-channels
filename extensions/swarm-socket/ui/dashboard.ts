@@ -3,12 +3,10 @@
  *
  * Live-updating widget showing swarm agent status.
  * Uses ctx.ui.setWidget() for a persistent display above the editor.
- * Uses pi.registerMessageRenderer() for styled swarm notifications.
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
-import { getSwarmState, type AgentInfo, type AgentStatus, buildChildrenMap } from "./state.js";
+import { getSwarmState, type AgentInfo, type AgentStatus } from "../core/state.js";
+import { getIdentity, buildChildrenMap } from "../core/identity.js";
 import { getAgentActivity } from "./activity.js";
 
 // Store ctx reference for dashboard updates triggered outside tool execution
@@ -24,18 +22,6 @@ function statusIcon(status: AgentStatus): string {
         case "disconnected": return "✗";
         case "crashed": return "✗";
         default: return "?";
-    }
-}
-
-function statusColor(status: AgentStatus): string {
-    switch (status) {
-        case "starting": return "muted";
-        case "running": return "accent";
-        case "done": return "success";
-        case "blocked": return "warning";
-        case "disconnected": return "error";
-        case "crashed": return "error";
-        default: return "dim";
     }
 }
 
@@ -77,7 +63,7 @@ export function updateDashboard(ctx?: any): void {
         stopRefresh();
     }
 
-    // Status bar: compact summary (read once, not in render loop)
+    // Status bar: compact summary
     const agents = Array.from(state.agents.values());
     const { total, done, running, blocked, failed } = summarize(agents);
     let statusText = `🐝 ${done}/${total}`;
@@ -96,7 +82,7 @@ export function updateDashboard(ctx?: any): void {
     }
 
     // Build tree from hierarchical codes
-    const myCode = process.env.PI_SWARM_CODE || "0";
+    const myCode = getIdentity().code;
     const { children } = buildChildrenMap(agents);
 
     // Recursive tree render
@@ -168,37 +154,4 @@ export function clearDashboard(force: boolean = false): void {
         dashboardCtx.ui.setWidget("swarm-dashboard", undefined);
         dashboardCtx.ui.setStatus("swarm", undefined);
     }
-    // Otherwise leave widget visible so user can see final state
-}
-
-/**
- * Register custom message renderers for swarm notification types.
- * Makes notifications look distinct from regular assistant messages.
- */
-export function registerMessageRenderers(pi: ExtensionAPI): void {
-    pi.registerMessageRenderer("swarm-nudge", (message, options, theme) => {
-        const text = theme.fg("accent", "🔔 ") + message.content;
-        return new Text(text, 0, 0);
-    });
-
-    pi.registerMessageRenderer("swarm-blocker", (message, options, theme) => {
-        const text = theme.fg("warning", "⚠️  ") + message.content;
-        return new Text(text, 0, 0);
-    });
-
-    pi.registerMessageRenderer("swarm-instruct", (message, options, theme) => {
-        const text = theme.fg("accent", "📋 ") + message.content;
-        return new Text(text, 0, 0);
-    });
-
-    pi.registerMessageRenderer("swarm-hive", (message, options, theme) => {
-        return new Text(theme.fg("accent", "🐝 ") + message.content, 0, 0);
-    });
-
-    pi.registerMessageRenderer("swarm-complete", (message, options, theme) => {
-        const text = theme.fg("success", "🐝 ") +
-            theme.fg("success", theme.bold("All swarm agents have completed.")) +
-            "\n" + theme.fg("dim", "Read the hive-mind file and agent reports to synthesize findings.");
-        return new Text(text, 0, 0);
-    });
 }
