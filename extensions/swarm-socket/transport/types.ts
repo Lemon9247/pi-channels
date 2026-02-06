@@ -1,27 +1,28 @@
 /**
  * Transport Layer Types
  *
- * Interfaces for the transport abstraction. Currently only Unix sockets
- * are implemented, but this interface allows for future transports
- * (mock, tunneled, etc.)
- *
- * NOTE: Design-only for P1. Server/client don't use these interfaces
- * yet — that's P2B.
+ * Interfaces for the transport abstraction. The server/client use these
+ * instead of net.Socket/net.Server directly. Currently implemented by
+ * UnixTransport (production) and InMemoryTransport (tests).
  */
 
+/** A bidirectional byte stream — the minimal abstraction over a connection. */
 export interface Transport {
     /** Send data through the transport */
     write(data: string): void;
+    /** Register a data handler */
+    onData(handler: (data: string) => void): void;
+    /** Register a close handler */
+    onClose(handler: () => void): void;
+    /** Register an error handler */
+    onError(handler: (err: Error) => void): void;
+    /** Close the transport */
+    close(): void;
     /** Whether the transport is currently connected */
     readonly connected: boolean;
-    /** Close the transport */
-    destroy(): void;
-    /** Register event handlers */
-    on(event: "data", handler: (data: Buffer) => void): this;
-    on(event: "close", handler: () => void): this;
-    on(event: "error", handler: (err: Error) => void): this;
 }
 
+/** Server that accepts Transport connections. */
 export interface TransportServer {
     /** Start listening for connections */
     start(): Promise<void>;
