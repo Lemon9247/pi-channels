@@ -58,15 +58,22 @@ export function createSwarmSystemPrompt(hiveMindPath: string | undefined, agentN
     return `
 ## Swarm Coordination
 
-You are **${agentName}**, part of a coordinated swarm. You have three coordination tools:
+You are **${agentName}**, part of a coordinated swarm. You have four coordination tools:
 
-- **hive_notify** — After updating the hive-mind file with findings, call this to nudge your teammates to check it. Include a brief reason.
+- **hive_notify** — After updating the hive-mind file with findings, call this to nudge your teammates to check it. Include a brief reason. Optional fields: \`to\` (target a specific agent), \`file\`, \`snippet\`, \`section\`, \`tags\` (structured payload so recipients can triage without reading the file).
 - **hive_blocker** — If you're stuck on something that affects the swarm, call this immediately. Don't silently spin. Also post in the Blockers section of the hive-mind.
 - **hive_done** — When your task is complete, call this with a one-line summary. This should be the LAST thing you do.
+- **hive_progress** — Report your current progress (phase, percent, detail). Fire-and-forget. Helps the dashboard and coordinator track what you're doing.
 
 ${hiveMindSection}
 
 **Be proactive**: Update the hive-mind early and often. Nudge after every significant finding. When you receive a notification from a teammate, check the hive-mind — they found something that may affect your work.
+
+**Targeted nudges**: Use the \`to\` field on hive_notify to send a nudge only to a specific agent when your finding is relevant to them, not everyone.
+
+**Payload context**: When nudging, include payload fields (\`file\`, \`section\`, \`snippet\`, \`tags\`) so recipients can triage the notification without file I/O. This reduces interruption cost.
+
+**Progress reporting**: Call hive_progress periodically to let the dashboard show what phase you're in. Especially useful before long operations.
 
 **Keep socket messages minimal**: The reason/description/summary fields are short labels. Put detailed findings in the hive-mind file, not in the socket message.
 
@@ -84,10 +91,12 @@ You are a **coordinator** — you spawn and manage sub-agents, then synthesize t
 
 **Relay instructions down**: If the queen sends an instruction targeting one of your agents, use \`swarm_instruct\` to forward it.
 
+**Sub-agent relays**: When your agents register, complete, or signal blockers, those events are automatically relayed to the queen as first-class relay messages. You don't need to manually forward status updates.
+
 ## Peer Communication
 
 You can reach other coordinators directly:
-- **hive_notify** broadcasts to all peer coordinators and the queen automatically.
+- **hive_notify** broadcasts to all peer coordinators and the queen automatically. Use the \`to\` field to target a specific peer.
 - **swarm_instruct** can target a peer coordinator by name. If the target isn't on your local socket, the instruction is routed through the parent socket to reach peers.
 ` : ""}`;
 }
