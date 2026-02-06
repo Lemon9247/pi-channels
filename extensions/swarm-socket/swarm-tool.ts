@@ -129,6 +129,13 @@ You are a **coordinator** — you spawn and manage sub-agents, then synthesize t
 **Reply via hive_notify**: Your chat messages do NOT reach the queen. If the queen sends you an instruction asking for information, you MUST respond using \`hive_notify\`. That's the only way your reply reaches the queen.
 
 **Relay instructions down**: If the queen sends an instruction targeting one of your agents, use \`swarm_instruct\` to forward it.
+
+## Peer Communication
+
+You can reach other coordinators directly:
+- **hive_notify** broadcasts to all peer coordinators and the queen automatically.
+- **swarm_instruct** can target a peer coordinator by name. If the target isn't on your local socket, the instruction is routed through the parent socket to reach peers.
+- Read the cross-swarm file and peer swarm directories for findings from other swarms.
 ` : ""}`;
 }
 

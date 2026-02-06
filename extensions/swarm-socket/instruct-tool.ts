@@ -83,6 +83,17 @@ export function registerInstructTool(pi: ExtensionAPI): void {
             }
 
             if (recipients.length === 0) {
+                // Parent-socket fallback: if we're a coordinator with a local server
+                // but the target isn't here, route through the parent socket to reach peers
+                const parentClient = getParentClient();
+                if (parentClient && parentClient.connected) {
+                    parentClient.instruct(params.instruction, params.to, params.swarm);
+                    return {
+                        content: [{ type: "text", text: `Instruction routed via parent socket to "${params.to || params.swarm || "all"}"` }],
+                        details: { target: params.to || params.swarm || "all", routed: true },
+                    };
+                }
+
                 const target = params.to || params.swarm || "all";
                 return {
                     content: [{ type: "text", text: `No agents found for target "${target}".` }],
