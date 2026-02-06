@@ -5,6 +5,7 @@
 import { test, assert, assertEqual, tmpSocketPath, delay, summarize } from "../helpers.js";
 import { SwarmServer } from "../../core/server.js";
 import { SwarmClient } from "../../core/client.js";
+import { UnixTransportServer } from "../../transport/unix-socket.js";
 import { parseSubRelay } from "../../core/state.js";
 
 async function main() {
@@ -12,7 +13,7 @@ async function main() {
 
     await test("coordinator relays sub-agent registration to queen via JSON nudge", async () => {
         const sock = tmpSocketPath();
-        const server = new SwarmServer(sock);
+        const server = new SwarmServer(new UnixTransportServer(sock));
         await server.start();
 
         const queen = new SwarmClient({ name: "queen", role: "queen" });
@@ -41,7 +42,7 @@ async function main() {
 
     await test("coordinator relays done + blocked to queen", async () => {
         const sock = tmpSocketPath();
-        const server = new SwarmServer(sock);
+        const server = new SwarmServer(new UnixTransportServer(sock));
         await server.start();
 
         const queen = new SwarmClient({ name: "queen", role: "queen" });
@@ -71,7 +72,7 @@ async function main() {
 
     await test("deep relay: sub-coordinator → coordinator → queen (passthrough)", async () => {
         const sock = tmpSocketPath();
-        const server = new SwarmServer(sock);
+        const server = new SwarmServer(new UnixTransportServer(sock));
         await server.start();
 
         const queen = new SwarmClient({ name: "queen", role: "queen" });

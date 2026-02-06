@@ -1,12 +1,13 @@
 /**
  * Swarm Socket Server
  *
- * Unix socket server that handles agent registration, message routing,
- * and access control for swarm coordination.
+ * Accepts connections via a TransportServer, handles agent registration,
+ * message routing, and access control for swarm coordination.
+ *
+ * Transport-agnostic — works with UnixTransportServer (production)
+ * or InMemoryTransportServer (tests).
  */
 
-import * as net from "node:net";
-import * as fs from "node:fs";
 import {
     type Role,
     type ClientMessage,
@@ -18,12 +19,13 @@ import {
     validateRegister,
     validateClientMessage,
 } from "../transport/protocol.js";
+import type { Transport, TransportServer } from "../transport/types.js";
 import { type SenderInfo, type Router, DefaultRouter } from "./router.js";
 
 export { type SenderInfo } from "./router.js";
 
 export interface ClientConnection extends SenderInfo {
-    socket: net.Socket;
+    transport: Transport;
     buffer: string;
     registered: boolean;
 }
@@ -36,59 +38,35 @@ export type ServerEventHandler = {
 };
 
 export class SwarmServer {
-    private server: net.Server;
+    private transportServer: TransportServer;
     private clients: Map<string, ClientConnection> = new Map();
-    private unregistered: Set<net.Socket> = new Set();
-    private socketPath: string;
+    private unregistered: Set<Transport> = new Set();
     private handlers: ServerEventHandler;
     private router: Router;
 
-    constructor(socketPath: string, handlers: ServerEventHandler = {}, router?: Router) {
-        this.socketPath = socketPath;
+    constructor(transportServer: TransportServer, handlers: ServerEventHandler = {}, router?: Router) {
+        this.transportServer = transportServer;
         this.handlers = handlers;
         this.router = router || new DefaultRouter();
-        this.server = net.createServer((socket) => this.handleConnection(socket));
+        this.transportServer.onConnection((transport) => this.handleConnection(transport));
     }
 
     async start(): Promise<void> {
-        // Clean up stale socket file
-        try {
-            fs.unlinkSync(this.socketPath);
-        } catch {
-            // Doesn't exist, fine
-        }
-
-        return new Promise((resolve, reject) => {
-            this.server.on("error", reject);
-            this.server.listen(this.socketPath, () => {
-                this.server.removeListener("error", reject);
-                resolve();
-            });
-        });
+        await this.transportServer.start();
     }
 
     async stop(): Promise<void> {
         // Close all client connections
         for (const client of this.clients.values()) {
-            client.socket.destroy();
+            client.transport.close();
         }
-        for (const socket of this.unregistered) {
-            socket.destroy();
+        for (const transport of this.unregistered) {
+            transport.close();
         }
         this.clients.clear();
         this.unregistered.clear();
 
-        return new Promise((resolve) => {
-            this.server.close(() => {
-                // Clean up socket file
-                try {
-                    fs.unlinkSync(this.socketPath);
-                } catch {
-                    // Already gone
-                }
-                resolve();
-            });
-        });
+        await this.transportServer.stop();
     }
 
     getClients(): Map<string, ClientConnection> {
@@ -115,24 +93,24 @@ export class SwarmServer {
         return this.router.canReach(from, to);
     }
 
-    private handleConnection(socket: net.Socket): void {
-        this.unregistered.add(socket);
+    private handleConnection(transport: Transport): void {
+        this.unregistered.add(transport);
 
         // Partial client state before registration
         const preClient: { buffer: string } = { buffer: "" };
 
-        socket.on("data", (data) => {
-            // Find the registered client for this socket, or use pre-registration state
+        transport.onData((data) => {
+            // Find the registered client for this transport
             let client: ClientConnection | undefined;
             for (const c of this.clients.values()) {
-                if (c.socket === socket) {
+                if (c.transport === transport) {
                     client = c;
                     break;
                 }
             }
 
             const state = client || preClient;
-            state.buffer += data.toString();
+            state.buffer += data;
             const { messages, remainder } = parseLines(state.buffer);
             state.buffer = remainder;
 
@@ -140,13 +118,13 @@ export class SwarmServer {
                 if (!client) {
                     // Must register first
                     if (!validateRegister(raw)) {
-                        this.sendToSocket(socket, serialize({ type: "error", message: "First message must be a valid register message" }));
+                        this.sendTo(transport, serialize({ type: "error", message: "First message must be a valid register message" }));
                         continue;
                     }
-                    this.handleRegister(socket, raw as RegisterMessage, preClient);
+                    this.handleRegister(transport, raw as RegisterMessage, preClient);
                     // After registration, find the client
                     for (const c of this.clients.values()) {
-                        if (c.socket === socket) {
+                        if (c.transport === transport) {
                             client = c;
                             // Transfer any remaining buffer
                             client.buffer = state.buffer;
@@ -155,7 +133,7 @@ export class SwarmServer {
                     }
                 } else {
                     if (!validateClientMessage(raw)) {
-                        this.sendToSocket(socket, serialize({ type: "error", message: "Invalid message format" }));
+                        this.sendTo(transport, serialize({ type: "error", message: "Invalid message format" }));
                         continue;
                     }
                     this.handleMessage(client, raw as ClientMessage);
@@ -163,11 +141,11 @@ export class SwarmServer {
             }
         });
 
-        socket.on("close", () => {
-            this.unregistered.delete(socket);
+        transport.onClose(() => {
+            this.unregistered.delete(transport);
             // Find and remove the registered client
             for (const [name, client] of this.clients.entries()) {
-                if (client.socket === socket) {
+                if (client.transport === transport) {
                     this.clients.delete(name);
                     this.handlers.onDisconnect?.(client);
                     break;
@@ -175,20 +153,20 @@ export class SwarmServer {
             }
         });
 
-        socket.on("error", (err) => {
+        transport.onError((err) => {
             this.handlers.onError?.(err);
         });
     }
 
-    private handleRegister(socket: net.Socket, msg: RegisterMessage, preClient: { buffer: string }): void {
+    private handleRegister(transport: Transport, msg: RegisterMessage, preClient: { buffer: string }): void {
         // Check name uniqueness
         if (this.clients.has(msg.name)) {
-            this.sendToSocket(socket, serialize({ type: "error", message: `Duplicate name: "${msg.name}"` }));
+            this.sendTo(transport, serialize({ type: "error", message: `Duplicate name: "${msg.name}"` }));
             return;
         }
 
         const client: ClientConnection = {
-            socket,
+            transport,
             name: msg.name,
             role: msg.role,
             swarm: msg.swarm,
@@ -197,14 +175,14 @@ export class SwarmServer {
         };
 
         this.clients.set(msg.name, client);
-        this.unregistered.delete(socket);
-        this.sendToSocket(socket, serialize({ type: "registered" }));
+        this.unregistered.delete(transport);
+        this.sendTo(transport, serialize({ type: "registered" }));
         this.handlers.onRegister?.(client);
     }
 
     private handleMessage(from: ClientConnection, msg: ClientMessage): void {
         if (msg.type === "register") {
-            this.sendToSocket(from.socket, serialize({ type: "error", message: "Already registered" }));
+            this.sendTo(from.transport, serialize({ type: "error", message: "Already registered" }));
             return;
         }
 
@@ -214,7 +192,7 @@ export class SwarmServer {
         if (recipients.length === 0 && msg.type === "instruct") {
             // Instruct with no valid recipients — notify sender
             const target = (msg as InstructMessage).to || (msg as InstructMessage).swarm || "all";
-            this.sendToSocket(from.socket, serialize({
+            this.sendTo(from.transport, serialize({
                 type: "error",
                 message: `No valid recipients for instruct to "${target}"`,
             }));
@@ -230,17 +208,17 @@ export class SwarmServer {
 
         const serialized = serialize(relayed);
         for (const recipient of recipients) {
-            this.sendToSocket(recipient.socket, serialized);
+            this.sendTo(recipient.transport, serialized);
         }
     }
 
-    private sendToSocket(socket: net.Socket, data: string): void {
+    private sendTo(transport: Transport, data: string): void {
         try {
-            if (!socket.destroyed) {
-                socket.write(data);
+            if (transport.connected) {
+                transport.write(data);
             }
         } catch {
-            // Socket might have closed between check and write
+            // Transport might have closed between check and write
         }
     }
 }

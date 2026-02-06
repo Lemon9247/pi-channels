@@ -3,9 +3,10 @@
  *
  * Connects to the swarm socket server, registers as an agent/coordinator/queen,
  * and provides methods to send messages and receive relayed messages.
+ *
+ * Transport-agnostic — uses Transport interface instead of net.Socket directly.
  */
 
-import * as net from "node:net";
 import { EventEmitter } from "node:events";
 import {
     type Role,
@@ -18,6 +19,8 @@ import {
     parseLines,
     isRelayedMessage,
 } from "../transport/protocol.js";
+import type { Transport } from "../transport/types.js";
+import { connectUnix } from "../transport/unix-socket.js";
 
 export interface SwarmClientOptions {
     name: string;
@@ -26,7 +29,7 @@ export interface SwarmClientOptions {
 }
 
 export class SwarmClient extends EventEmitter {
-    private socket: net.Socket | null = null;
+    private transport: Transport | null = null;
     private buffer: string = "";
     private options: SwarmClientOptions;
     private _connected: boolean = false;
@@ -59,24 +62,28 @@ export class SwarmClient extends EventEmitter {
 
     /**
      * Connect to the socket and register. Resolves when registration is confirmed.
+     * Creates a UnixTransport from the socket path.
      */
     async connect(socketPath: string): Promise<void> {
+        const transport = await connectUnix(socketPath);
+        return this.connectWithTransport(transport);
+    }
+
+    /**
+     * Connect using a pre-created Transport (e.g. InMemoryTransport for tests).
+     * Sends registration and resolves when confirmed.
+     */
+    async connectWithTransport(transport: Transport): Promise<void> {
+        this.transport = transport;
+        this._connected = true;
+
         return new Promise((resolve, reject) => {
-            this.socket = net.createConnection(socketPath, () => {
-                this._connected = true;
+            let registrationDone = false;
 
-                // Send registration
-                this.send({
-                    type: "register",
-                    name: this.options.name,
-                    role: this.options.role,
-                    swarm: this.options.swarm,
-                });
-            });
-
-            // Wait for registered confirmation or error
-            const onData = (data: Buffer) => {
-                this.buffer += data.toString();
+            // Register data handler BEFORE sending — with synchronous transports
+            // (InMemoryTransport), the response arrives during the write() call.
+            const onData = (data: string) => {
+                this.buffer += data;
                 const { messages, remainder } = parseLines(this.buffer);
                 this.buffer = remainder;
 
@@ -86,8 +93,8 @@ export class SwarmClient extends EventEmitter {
                     if ((msg as RegisteredMessage).type === "registered") {
                         this._registered = true;
                         // Switch to normal message handling
-                        this.socket!.removeListener("data", onData);
-                        this.socket!.on("data", (d) => this.handleData(d));
+                        this.transport!.onData((d) => this.handleData(d));
+                        registrationDone = true;
                         resolve();
                         return;
                     }
@@ -100,9 +107,13 @@ export class SwarmClient extends EventEmitter {
                 }
             };
 
-            this.socket.on("data", onData);
+            transport.onData((data) => {
+                if (!registrationDone) {
+                    onData(data);
+                }
+            });
 
-            this.socket.on("error", (err) => {
+            transport.onError((err) => {
                 if (!this._registered) {
                     reject(err);
                 } else {
@@ -110,22 +121,30 @@ export class SwarmClient extends EventEmitter {
                 }
             });
 
-            this.socket.on("close", () => {
+            transport.onClose(() => {
                 this._connected = false;
                 this._registered = false;
                 this.emit("disconnect");
+            });
+
+            // Send registration AFTER handlers are set up
+            this.send({
+                type: "register",
+                name: this.options.name,
+                role: this.options.role,
+                swarm: this.options.swarm,
             });
         });
     }
 
     /**
-     * Send a message through the socket.
+     * Send a message through the transport.
      */
     send(msg: ClientMessage): void {
-        if (!this.socket || this.socket.destroyed) {
+        if (!this.transport || !this.transport.connected) {
             throw new Error("Not connected");
         }
-        this.socket.write(serialize(msg));
+        this.transport.write(serialize(msg));
     }
 
     /**
@@ -160,16 +179,16 @@ export class SwarmClient extends EventEmitter {
      * Disconnect from the server.
      */
     disconnect(): void {
-        if (this.socket) {
-            this.socket.destroy();
-            this.socket = null;
+        if (this.transport) {
+            this.transport.close();
+            this.transport = null;
             this._connected = false;
             this._registered = false;
         }
     }
 
-    private handleData(data: Buffer): void {
-        this.buffer += data.toString();
+    private handleData(data: string): void {
+        this.buffer += data;
         const { messages, remainder } = parseLines(this.buffer);
         this.buffer = remainder;
 

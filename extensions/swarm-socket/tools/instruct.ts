@@ -115,11 +115,11 @@ export function registerInstructTool(pi: ExtensionAPI): void {
 
             for (const recipient of recipients) {
                 try {
-                    if (!recipient.socket.destroyed) {
-                        recipient.socket.write(data);
+                    if (recipient.transport.connected) {
+                        recipient.transport.write(data);
                     }
                 } catch {
-                    // Socket may have closed
+                    // Transport may have closed
                 }
             }
 
