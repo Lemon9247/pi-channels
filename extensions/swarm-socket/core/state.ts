@@ -22,6 +22,9 @@ export interface AgentInfo {
     process?: ChildProcess;
     doneSummary?: string;
     blockerDescription?: string;
+    progressPhase?: string;    // Current phase from ProgressMessage
+    progressPercent?: number;  // 0-100 from ProgressMessage
+    progressDetail?: string;   // Status line from ProgressMessage
 }
 
 import type { RelayEvent } from "../transport/protocol.js";

@@ -104,6 +104,14 @@ export function updateDashboard(ctx?: any): void {
                 detail = agent.blockerDescription.length > 50
                     ? agent.blockerDescription.slice(0, 50) + "…"
                     : agent.blockerDescription;
+            } else if (agent.progressPhase || agent.progressPercent != null || agent.progressDetail) {
+                // Show progress info if available
+                const parts: string[] = [];
+                if (agent.progressPhase) parts.push(agent.progressPhase);
+                if (agent.progressPercent != null) parts.push(`${agent.progressPercent}%`);
+                if (agent.progressDetail) parts.push(agent.progressDetail);
+                detail = parts.join(" — ");
+                if (detail.length > 50) detail = detail.slice(0, 50) + "…";
             } else {
                 const activity = getAgentActivity(agent.name);
                 const last = activity.length > 0 ? activity[activity.length - 1] : null;

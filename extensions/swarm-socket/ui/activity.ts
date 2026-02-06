@@ -92,6 +92,12 @@ function parseJsonEvent(agentName: string, line: string): void {
                 summary = `hive_blocker "${event.args?.description || ""}"`;
             } else if (toolName === "hive_done") {
                 summary = `hive_done "${event.args?.summary || ""}"`;
+            } else if (toolName === "hive_progress") {
+                const parts: string[] = [];
+                if (event.args?.phase) parts.push(event.args.phase);
+                if (event.args?.percent != null) parts.push(`${event.args.percent}%`);
+                if (event.args?.detail) parts.push(event.args.detail);
+                summary = `hive_progress ${parts.join(" — ") || ""}`;
             }
 
             pushEvent(agentName, {

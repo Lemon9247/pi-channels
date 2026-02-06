@@ -13,6 +13,75 @@ import { Type } from "@sinclair/typebox";
 import { SwarmClient } from "../core/client.js";
 
 export function registerAgentTools(pi: ExtensionAPI, client: SwarmClient): void {
+    // === hive_progress ===
+    pi.registerTool({
+        name: "hive_progress",
+        label: "Hive Progress",
+        description:
+            "Report your current progress to the swarm dashboard. " +
+            "Fire-and-forget — no response expected. Use this to show what phase you're in, " +
+            "how far along you are, or what you're currently doing.",
+        parameters: Type.Object({
+            phase: Type.Optional(Type.String({
+                description: "Current phase (e.g. 'reading files', 'running tests', 'writing report')",
+            })),
+            percent: Type.Optional(Type.Number({
+                description: "Completion percentage 0-100",
+            })),
+            detail: Type.Optional(Type.String({
+                description: "Short status line",
+            })),
+        }),
+        async execute(_toolCallId, params) {
+            if (!client.connected) {
+                return {
+                    content: [{ type: "text", text: "Not connected to swarm socket. Progress not sent." }],
+                    details: {},
+                    isError: true,
+                };
+            }
+            try {
+                client.progress({
+                    phase: params.phase,
+                    percent: params.percent,
+                    detail: params.detail,
+                });
+                const parts: string[] = [];
+                if (params.phase) parts.push(params.phase);
+                if (params.percent != null) parts.push(`${params.percent}%`);
+                if (params.detail) parts.push(params.detail);
+                return {
+                    content: [{ type: "text", text: `Progress: ${parts.join(" — ") || "(empty)"}` }],
+                    details: {},
+                };
+            } catch (err) {
+                return {
+                    content: [{ type: "text", text: `Failed to send progress: ${err}` }],
+                    details: {},
+                    isError: true,
+                };
+            }
+        },
+        renderCall(args, theme) {
+            const parts: string[] = [];
+            if (args.phase) parts.push(args.phase);
+            if (args.percent != null) parts.push(`${args.percent}%`);
+            if (args.detail) parts.push(args.detail);
+            return new Text(
+                theme.fg("toolTitle", theme.bold("hive_progress ")) +
+                    theme.fg("dim", parts.join(" — ") || "..."),
+                0,
+                0,
+            );
+        },
+        renderResult(result, _opts, theme) {
+            const text = result.content[0];
+            const content = text?.type === "text" ? text.text : "";
+            const color = result.isError ? "error" : "success";
+            return new Text(theme.fg(color, content), 0, 0);
+        },
+    });
+
     pi.registerTool({
         name: "hive_notify",
         label: "Hive Notify",

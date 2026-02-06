@@ -240,8 +240,14 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
 
                             state.onNudge?.(reason, _from.name);
                         } else if (msg.type === "progress") {
-                            // Progress messages: update activity feed
+                            // Progress messages: update agent info and activity feed
                             const progressMsg = msg as { type: "progress"; phase?: string; percent?: number; detail?: string };
+                            const agent = state.agents.get(_from.name);
+                            if (agent) {
+                                if (progressMsg.phase != null) agent.progressPhase = progressMsg.phase;
+                                if (progressMsg.percent != null) agent.progressPercent = progressMsg.percent;
+                                if (progressMsg.detail != null) agent.progressDetail = progressMsg.detail;
+                            }
                             const detail = progressMsg.detail || progressMsg.phase || "progress";
                             const pct = progressMsg.percent != null ? ` (${progressMsg.percent}%)` : "";
                             pushSyntheticEvent(_from.name, "message", `${detail}${pct}`);
