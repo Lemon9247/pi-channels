@@ -12,8 +12,8 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { SwarmClient } from "./client.js";
-import type { RelayedMessage } from "./protocol.js";
+import { SwarmClient } from "../core/client.js";
+import type { RelayedMessage } from "../transport/protocol.js";
 
 export function setupNotifications(pi: ExtensionAPI, client: SwarmClient): void {
     client.on("message", (relayed: RelayedMessage) => {
@@ -67,7 +67,6 @@ export function setupNotifications(pi: ExtensionAPI, client: SwarmClient): void 
 
             case "done": {
                 // Don't inject into context — tracked via state
-                // (The swarm-tool monitors completion server-side)
                 break;
             }
         }

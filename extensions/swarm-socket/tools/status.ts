@@ -8,7 +8,8 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { getSwarmState, type AgentInfo, buildChildrenMap } from "./state.js";
+import { getSwarmState, type AgentInfo } from "../core/state.js";
+import { getIdentity, buildChildrenMap } from "../core/identity.js";
 
 function statusIcon(status: string): string {
     switch (status) {
@@ -62,7 +63,7 @@ export function registerStatusTool(pi: ExtensionAPI): void {
             }
 
             // Tree view using hierarchical codes
-            const myCode = process.env.PI_SWARM_CODE || "0";
+            const myCode = getIdentity().code;
             const { children } = buildChildrenMap(agents);
 
             function renderTree(code: string, indent: string): void {

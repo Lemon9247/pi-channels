@@ -16,15 +16,17 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { SwarmClient } from "./client.js";
-import { registerSwarmTool } from "./swarm-tool.js";
-import { registerInstructTool } from "./instruct-tool.js";
-import { registerStatusTool } from "./status-tool.js";
-import { registerAgentTools } from "./agent-tools.js";
-import { setupNotifications } from "./notifications.js";
-import { cleanupSwarm, setParentClient } from "./state.js";
-import { registerMessageRenderers, clearDashboard } from "./dashboard.js";
-import { registerSwarmCommand } from "./swarm-command.js";
+import { SwarmClient } from "./core/client.js";
+import { createIdentity } from "./core/identity.js";
+import { registerSwarmTool } from "./tools/swarm.js";
+import { registerInstructTool } from "./tools/instruct.js";
+import { registerStatusTool } from "./tools/status.js";
+import { registerAgentTools } from "./tools/agent.js";
+import { setupNotifications } from "./ui/notifications.js";
+import { cleanupSwarm, setParentClient } from "./core/state.js";
+import { registerMessageRenderers } from "./ui/renderers.js";
+import { clearDashboard } from "./ui/dashboard.js";
+import { registerSwarmCommand } from "./ui/commands.js";
 
 /** Clean up stale socket files from crashed sessions */
 function cleanStaleSockets(): void {
@@ -56,21 +58,22 @@ function cleanStaleSockets(): void {
 }
 
 export default function (pi: ExtensionAPI) {
+    // Initialize identity from environment variables
+    const identity = createIdentity();
+
     // Clean stale sockets on startup (queen mode only)
     if (!process.env.PI_SWARM_SOCKET) {
         cleanStaleSockets();
     }
-    const socketPath = process.env.PI_SWARM_SOCKET;
-    const agentName = process.env.PI_SWARM_AGENT_NAME;
-    const agentRole = process.env.PI_SWARM_AGENT_ROLE as "coordinator" | "agent" | undefined;
-    const agentSwarm = process.env.PI_SWARM_AGENT_SWARM;
 
-    if (socketPath && agentName && agentRole) {
+    const socketPath = process.env.PI_SWARM_SOCKET;
+
+    if (socketPath && identity.role !== "queen") {
         // We're inside a swarm — connect as client
         const client = new SwarmClient({
-            name: agentName,
-            role: agentRole,
-            swarm: agentSwarm,
+            name: identity.name,
+            role: identity.role,
+            swarm: identity.swarm,
         });
 
         // Store as parent client so coordinator can relay through it
@@ -81,7 +84,7 @@ export default function (pi: ExtensionAPI) {
             try {
                 await client.connect(socketPath);
                 if (ctx.hasUI) {
-                    ctx.ui.setStatus("swarm", `🐝 ${agentName} (${agentRole})`);
+                    ctx.ui.setStatus("swarm", `🐝 ${identity.name} (${identity.role})`);
                 }
             } catch (err) {
                 // Socket connection failed — agent runs without coordination
@@ -96,8 +99,6 @@ export default function (pi: ExtensionAPI) {
 
         // Set up incoming message handler
         setupNotifications(pi, client);
-
-        // Shutdown is handled below in the unified handler
     }
 
     // Register message renderers for all swarm notification types
@@ -110,7 +111,7 @@ export default function (pi: ExtensionAPI) {
     // - Queen (no PI_SWARM_SOCKET): gets swarm + instruct + status
     // - Coordinator: gets swarm + instruct + status (can spawn sub-agents)
     // - Agent: gets NONE of these (agents do work, they don't delegate)
-    if (!agentRole || agentRole === "coordinator") {
+    if (identity.role === "queen" || identity.role === "coordinator") {
         registerSwarmTool(pi);
         registerInstructTool(pi);
         registerStatusTool(pi);
@@ -122,8 +123,7 @@ export default function (pi: ExtensionAPI) {
     pi.on("session_shutdown", async () => {
         clearDashboard(true);
         await cleanupSwarm();
-        if (socketPath && agentName && agentRole) {
-            // We captured client in the closure above
+        if (socketPath && identity.role !== "queen") {
             const pc = getParentClient();
             if (pc) pc.disconnect();
         }

@@ -10,10 +10,11 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { getSwarmState, type AgentInfo, type AgentStatus, buildChildrenMap, cleanupSwarm, gracefulShutdown } from "./state.js";
+import { getSwarmState, type AgentInfo, type AgentStatus, cleanupSwarm, gracefulShutdown } from "../core/state.js";
+import { getIdentity, buildChildrenMap } from "../core/identity.js";
 import { getAgentActivity, clearActivity, type ActivityEvent } from "./activity.js";
 import { clearDashboard } from "./dashboard.js";
-import { serialize, type RelayedMessage } from "./protocol.js";
+import { serialize, type RelayedMessage } from "../transport/protocol.js";
 
 function statusIcon(status: AgentStatus): string {
     switch (status) {
@@ -115,8 +116,6 @@ export function registerSwarmCommand(pi: ExtensionAPI): void {
             ctx.ui.notify("Sending shutdown signal to all agents (30s timeout)...", "info");
 
             // Bypass server routing — broadcast directly to all connected clients.
-            // This is intentional: we want every agent to receive the shutdown
-            // instruction regardless of swarm membership or role restrictions.
             const sendInstruct = (instruction: string) => {
                 const msg = serialize({
                     from: "queen",
@@ -161,7 +160,7 @@ function printOverview(pi: ExtensionAPI, state: ReturnType<typeof getSwarmState>
     text += "\n";
 
     // Build tree from hierarchical codes
-    const myCode = process.env.PI_SWARM_CODE || "0";
+    const myCode = getIdentity().code;
     const { children } = buildChildrenMap(agents);
 
     // Recursive tree render

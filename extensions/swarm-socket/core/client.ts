@@ -17,7 +17,7 @@ import {
     serialize,
     parseLines,
     isRelayedMessage,
-} from "./protocol.js";
+} from "../transport/protocol.js";
 
 export interface SwarmClientOptions {
     name: string;

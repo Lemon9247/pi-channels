@@ -10,7 +10,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { SwarmClient } from "./client.js";
+import { SwarmClient } from "../core/client.js";
 
 export function registerAgentTools(pi: ExtensionAPI, client: SwarmClient): void {
     pi.registerTool({

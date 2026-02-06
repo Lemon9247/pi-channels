@@ -37,39 +37,6 @@ export interface SubAgentRelay {
     reason?: string;
 }
 
-// Derive level from code: "0.1.2" → 2 (count the dots)
-export function codeLevel(code: string): number {
-    return code.split(".").length - 1;
-}
-
-// Derive parent code: "0.1.2" → "0.1", "0.1" → "0"
-export function parentCode(code: string): string {
-    const parts = code.split(".");
-    return parts.slice(0, -1).join(".");
-}
-
-// Check if code is a descendant of another: "0.1.2" is under "0.1"
-export function isDescendantOf(code: string, ancestor: string): boolean {
-    return code.startsWith(ancestor + ".");
-}
-
-/**
- * Build a children lookup from a list of agents, grouped by parent code.
- * Returns a map of parentCode → sorted child agents.
- */
-export function buildChildrenMap(agents: AgentInfo[]): { sorted: AgentInfo[]; children: Map<string, AgentInfo[]> } {
-    const sorted = agents.slice().sort((a, b) =>
-        a.code.localeCompare(b.code, undefined, { numeric: true })
-    );
-    const children = new Map<string, AgentInfo[]>();
-    for (const agent of sorted) {
-        const pc = parentCode(agent.code);
-        if (!children.has(pc)) children.set(pc, []);
-        children.get(pc)!.push(agent);
-    }
-    return { sorted, children };
-}
-
 /** Try to parse a nudge reason as a sub-agent relay. Returns null if not a relay. */
 export function parseSubRelay(reason: string): SubAgentRelay | null {
     if (!reason.startsWith("{")) return null;
@@ -143,9 +110,6 @@ function checkAllDone(): void {
 
 /**
  * Graceful shutdown: ask agents to wrap up, wait for completion, then force-kill stragglers.
- *
- * @param server - The swarm server (used to check if agents are still connected)
- * @param sendInstruct - Function that broadcasts an instruct message to all agents
  */
 export async function gracefulShutdown(
     server: SwarmServer,
@@ -198,4 +162,3 @@ export async function cleanupSwarm(): Promise<void> {
 
     activeSwarm = null;
 }
-

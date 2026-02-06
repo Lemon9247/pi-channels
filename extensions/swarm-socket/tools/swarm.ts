@@ -9,19 +9,30 @@
  * - Coordinator: reuses existing socket, spawns sub-agents
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
-import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { SwarmServer } from "./server.js";
-import { type AgentInfo, type SwarmState, type SubAgentRelay, getSwarmState, getSwarmGeneration, setSwarmState, updateAgentStatus, cleanupSwarm, parseSubRelay, getParentClient } from "./state.js";
-import { updateDashboard } from "./dashboard.js";
-import { trackAgentOutput, clearActivity, pushSyntheticEvent } from "./activity.js";
-import { discoverAgents, type AgentConfig } from "./agents.js";
+import { SwarmServer } from "../core/server.js";
+import {
+    type AgentInfo,
+    type SwarmState,
+    type SubAgentRelay,
+    getSwarmState,
+    getSwarmGeneration,
+    setSwarmState,
+    updateAgentStatus,
+    cleanupSwarm,
+    parseSubRelay,
+    getParentClient,
+} from "../core/state.js";
+import { createHiveMindFile } from "../core/prompts.js";
+import { spawnAgent } from "../core/spawn.js";
+import { discoverAgents } from "../core/agents.js";
+import { updateDashboard } from "../ui/dashboard.js";
+import { trackAgentOutput, clearActivity, pushSyntheticEvent } from "../ui/activity.js";
 
 // Agent definition — pre-defined by name or inline
 const AgentDef = Type.Object({
@@ -53,180 +64,6 @@ const SwarmParams = Type.Object({
 function generateSocketPath(): string {
     const id = crypto.randomBytes(4).toString("hex");
     return path.join(os.tmpdir(), `pi-swarm-${id}.sock`);
-}
-
-function createHiveMindFile(hiveMindPath: string, overview: string | undefined, agents: AgentInfo[]): void {
-    // Don't overwrite an existing hive-mind file — a parent swarm may have created it
-    if (fs.existsSync(hiveMindPath)) {
-        return;
-    }
-
-    const title = overview || "Swarm Task";
-    const agentList = agents
-        .map((a) => `- **${a.name}** (${a.role}, swarm: ${a.swarm}): ${a.task}`)
-        .join("\n");
-    const statusList = agents.map((a) => `- [ ] ${a.name}`).join("\n");
-
-    const content = `# Hive Mind: ${title}
-
-## Task Overview
-${overview || "(No overview provided)"}
-
-## Agents
-${agentList}
-
-## Findings
-(Agents: add your discoveries here. Be specific — file paths, line numbers, code snippets.)
-
-## Questions
-(Post questions here. Check back for answers from other agents.)
-
-## Blockers
-(If blocked, post here AND call hive_blocker.)
-
-## Status
-${statusList}
-`;
-
-    // Create parent directory if needed
-    const dir = path.dirname(hiveMindPath);
-    if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-    }
-    fs.writeFileSync(hiveMindPath, content, "utf-8");
-}
-
-function createSwarmSystemPrompt(hiveMindPath: string | undefined, agentName: string, role: string = "agent"): string {
-    const hiveMindSection = hiveMindPath
-        ? `The hive-mind file is at: ${hiveMindPath}`
-        : "No hive-mind file was specified for this swarm.";
-
-    return `
-## Swarm Coordination
-
-You are **${agentName}**, part of a coordinated swarm. You have three coordination tools:
-
-- **hive_notify** — After updating the hive-mind file with findings, call this to nudge your teammates to check it. Include a brief reason.
-- **hive_blocker** — If you're stuck on something that affects the swarm, call this immediately. Don't silently spin. Also post in the Blockers section of the hive-mind.
-- **hive_done** — When your task is complete, call this with a one-line summary. This should be the LAST thing you do.
-
-${hiveMindSection}
-
-**Be proactive**: Update the hive-mind early and often. Nudge after every significant finding. When you receive a notification from a teammate, check the hive-mind — they found something that may affect your work.
-
-**Keep socket messages minimal**: The reason/description/summary fields are short labels. Put detailed findings in the hive-mind file, not in the socket message.
-
-**CRITICAL — Hive-mind file is shared**: Multiple agents write to the same hive-mind file. NEVER use the write tool to overwrite it. ALWAYS use the edit tool to surgically insert your content into the appropriate section. Read the file first to see what others have written, then use edit to add your findings below theirs. If you overwrite the file, you will destroy other agents' work.
-
-**Always call hive_done when finished.** The swarm coordinator is waiting for your completion signal.
-${role === "coordinator" ? `
-## Coordinator Instructions
-
-You are a **coordinator** — you spawn and manage sub-agents, then synthesize their work.
-
-**Stay responsive**: The queen may send you instructions at any time. Instructions arrive between tool calls, so **never use long sleep commands**. When waiting for agents, poll with \`swarm_status\` every 5-10 seconds. Do NOT use \`bash sleep\` for more than 5 seconds.
-
-**Reply via hive_notify**: Your chat messages do NOT reach the queen. If the queen sends you an instruction asking for information, you MUST respond using \`hive_notify\`. That's the only way your reply reaches the queen.
-
-**Relay instructions down**: If the queen sends an instruction targeting one of your agents, use \`swarm_instruct\` to forward it.
-
-## Peer Communication
-
-You can reach other coordinators directly:
-- **hive_notify** broadcasts to all peer coordinators and the queen automatically.
-- **swarm_instruct** can target a peer coordinator by name. If the target isn't on your local socket, the instruction is routed through the parent socket to reach peers.
-` : ""}`;
-}
-
-function writePromptToTempFile(name: string, prompt: string): { dir: string; filePath: string } {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-swarm-"));
-    const safeName = name.replace(/[^\w.-]+/g, "_");
-    const filePath = path.join(tmpDir, `swarm-prompt-${safeName}.md`);
-    fs.writeFileSync(filePath, prompt, { encoding: "utf-8", mode: 0o600 });
-    return { dir: tmpDir, filePath };
-}
-
-function spawnAgent(
-    agentDef: typeof AgentDef extends { static: infer T } ? T : any,
-    socketPath: string,
-    hiveMindPath: string | undefined,
-    defaultCwd: string,
-    code: string,
-    knownAgents?: Map<string, AgentConfig>,
-): { process: ChildProcess; tmpDir?: string } {
-    // Clone to avoid mutating caller's params
-    agentDef = { ...agentDef };
-
-    // Pre-defined agent — merge config defaults before building args
-    if (agentDef.agent && knownAgents) {
-        const agentConfig = knownAgents.get(agentDef.agent);
-        if (agentConfig) {
-            if (!agentDef.systemPrompt && agentConfig.systemPrompt) {
-                agentDef.systemPrompt = agentConfig.systemPrompt;
-            }
-            if (!agentDef.tools && agentConfig.tools) {
-                agentDef.tools = agentConfig.tools;
-            }
-            if (!agentDef.model && agentConfig.model) {
-                agentDef.model = agentConfig.model;
-            }
-        }
-    }
-
-    const args: string[] = ["--mode", "json", "-p", "--no-session"];
-
-    // Model (after merge so pre-defined agent model is available)
-    if (agentDef.model) {
-        args.push("--model", agentDef.model);
-    }
-
-    // Tools
-    if (agentDef.tools && agentDef.tools.length > 0) {
-        args.push("--tools", agentDef.tools.join(","));
-    }
-
-    // System prompt: combine agent-specific + swarm coordination instructions
-    let systemPrompt = "";
-    if (agentDef.systemPrompt) {
-        systemPrompt = agentDef.systemPrompt + "\n\n";
-    }
-    systemPrompt += createSwarmSystemPrompt(hiveMindPath, agentDef.name, agentDef.role);
-
-    const { dir: tmpDir, filePath: tmpPromptPath } = writePromptToTempFile(agentDef.name, systemPrompt);
-    args.push("--append-system-prompt", tmpPromptPath);
-
-    // Task as the prompt
-    args.push(`Task: ${agentDef.task}`);
-
-    // Environment variables for socket connection
-    const env = {
-        ...process.env,
-        PI_SWARM_SOCKET: socketPath,
-        PI_SWARM_AGENT_NAME: agentDef.name,
-        PI_SWARM_AGENT_ROLE: agentDef.role,
-        PI_SWARM_AGENT_SWARM: agentDef.swarm,
-        PI_SWARM_CODE: code,
-    };
-
-    const proc = spawn("pi", args, {
-        cwd: agentDef.cwd || defaultCwd,
-        shell: false,
-        stdio: ["ignore", "pipe", "pipe"],
-        detached: true,  // Own process group — enables killing entire subtree
-        env,
-    });
-
-    // Clean up temp files when process exits
-    proc.on("close", () => {
-        try {
-            fs.unlinkSync(tmpPromptPath);
-        } catch { /* ignore */ }
-        try {
-            fs.rmdirSync(tmpDir);
-        } catch { /* ignore */ }
-    });
-
-    return { process: proc, tmpDir };
 }
 
 /**
@@ -287,7 +124,6 @@ function handleSubAgentRelay(state: SwarmState, relay: SubAgentRelay, ctx: any):
     } else if (relay.type === "nudge") {
         pushSyntheticEvent(relay.name, "message", `hive-mind: ${relay.reason || ""}`);
     }
-    // "nudge" relays are informational — don't change state, just update dashboard
 
     updateDashboard(ctx);
 
@@ -334,9 +170,6 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
             }
 
             // Always create a new socket for this swarm.
-            // Queen creates a socket for coordinators. Coordinators create their own
-            // socket for sub-agents. Per-swarm sockets give structural isolation —
-            // agents in different swarms are on different buses.
             let socketPath: string;
             let server: SwarmServer | null = null;
 
@@ -349,7 +182,6 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                 server = new SwarmServer(socketPath, {
                     onRegister: (client) => {
                         if (getSwarmGeneration() !== gen) return;
-                        // Mark agent as running when it registers
                         updateAgentStatus(client.name, "running");
                         updateDashboard(ctx);
                         // Relay registration up to parent
@@ -369,7 +201,6 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                     },
                     onMessage: (_from, msg) => {
                         if (getSwarmGeneration() !== gen) return;
-                        // Monitor ALL messages server-side
                         const state = getSwarmState();
                         if (!state) return;
 
@@ -385,11 +216,10 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                             const nudgeMsg = msg as { type: "nudge"; reason: string };
                             const reason = nudgeMsg.reason;
 
-                            // Parse sub-agent relay messages from coordinators
                             const relay = parseSubRelay(reason);
                             if (relay) {
                                 handleSubAgentRelay(state, relay, ctx);
-                                return; // Don't pass relay messages as nudges
+                                return;
                             }
 
                             state.onNudge?.(reason, _from.name);
@@ -403,7 +233,6 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                         if (agent && agent.status !== "done") {
                             updateAgentStatus(client.name, "disconnected");
                             updateDashboard(ctx);
-                            // Relay disconnection up to parent
                             const pc = getParentClient();
                             if (pc && pc.connected) {
                                 const relay: SubAgentRelay = {
@@ -462,7 +291,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
 
             // Set up state
             const state: SwarmState = {
-                generation: 0,  // Placeholder — setSwarmState() assigns the real value
+                generation: 0,
                 server,
                 socketPath,
                 agents: agentMap,
@@ -471,13 +300,11 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
 
             // Detect if we're a coordinator (have a parent socket to relay to)
             const parentClient = getParentClient();
-            const isCoordinator = !!parentClient;
 
             // Wire up notifications to pi.sendMessage + optional upward relay
             state.onAgentDone = (agentName, summary) => {
                 if (getSwarmGeneration() !== gen) return;
                 updateDashboard(ctx);
-                // Relay up to parent
                 if (parentClient && parentClient.connected) {
                     const agent = agentMap.get(agentName);
                     const relay: SubAgentRelay = {
@@ -506,7 +333,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                 updateDashboard(ctx);
             };
 
-            state.onBlocker = (agentName, description, from) => {
+            state.onBlocker = (agentName, description, _from) => {
                 if (getSwarmGeneration() !== gen) return;
                 pi.sendMessage(
                     {
@@ -517,7 +344,6 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                     { deliverAs: "steer" },
                 );
                 updateDashboard(ctx);
-                // Relay up to parent
                 if (parentClient && parentClient.connected) {
                     const agent = state.agents.get(agentName);
                     const relay: SubAgentRelay = {
@@ -540,7 +366,6 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                     },
                     { deliverAs: "followUp" },
                 );
-                // Relay up to parent
                 if (parentClient && parentClient.connected) {
                     const agent = Array.from(state.agents.values()).find(a => a.name === from);
                     const relay: SubAgentRelay = {
@@ -566,7 +391,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
 
                 agentInfo.process = proc;
 
-                // Capture stderr for debugging (declared before close handler that uses it)
+                // Capture stderr for debugging
                 let stderr = "";
                 proc.stderr?.on("data", (data) => {
                     stderr = (stderr + data.toString()).slice(-2048);
@@ -583,7 +408,6 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                             updateAgentStatus(agentDef.name, "done");
                         } else {
                             updateAgentStatus(agentDef.name, "crashed");
-                            // Notify queen about the crash
                             pi.sendMessage(
                                 {
                                     customType: "swarm-blocker",
@@ -612,14 +436,12 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                     updateDashboard(ctx);
                 });
 
-                // Track agent stdout (JSON events) for activity feed
                 if (proc.stdout) {
                     trackAgentOutput(agentDef.name, proc.stdout);
                 }
             }
 
-            // Timeout for agents stuck in "starting" — if they haven't registered
-            // within 30 seconds, mark them crashed
+            // Timeout for agents stuck in "starting"
             setTimeout(() => {
                 if (getSwarmGeneration() !== gen) return;
                 const current = getSwarmState();

@@ -17,14 +17,10 @@ import {
     parseLines,
     validateRegister,
     validateClientMessage,
-} from "./protocol.js";
+} from "../transport/protocol.js";
+import { type SenderInfo, type Router, DefaultRouter } from "./router.js";
 
-/** Identity fields used for routing — no socket dependency */
-export interface SenderInfo {
-    name: string;
-    role: Role;
-    swarm?: string;
-}
+export { type SenderInfo } from "./router.js";
 
 export interface ClientConnection extends SenderInfo {
     socket: net.Socket;
@@ -45,10 +41,12 @@ export class SwarmServer {
     private unregistered: Set<net.Socket> = new Set();
     private socketPath: string;
     private handlers: ServerEventHandler;
+    private router: Router;
 
-    constructor(socketPath: string, handlers: ServerEventHandler = {}) {
+    constructor(socketPath: string, handlers: ServerEventHandler = {}, router?: Router) {
         this.socketPath = socketPath;
         this.handlers = handlers;
+        this.router = router || new DefaultRouter();
         this.server = net.createServer((socket) => this.handleConnection(socket));
     }
 
@@ -99,6 +97,22 @@ export class SwarmServer {
 
     getClient(name: string): ClientConnection | undefined {
         return this.clients.get(name);
+    }
+
+    /**
+     * Get valid recipients for a message using the router.
+     * Convenience method that passes the current client map.
+     */
+    getRecipients(from: SenderInfo, msg: ClientMessage): ClientConnection[] {
+        return this.router.getRecipients(from, msg, this.clients);
+    }
+
+    /**
+     * Check if `from` is allowed to send messages to `to`.
+     * Delegates to the router.
+     */
+    canReach(from: SenderInfo, to: SenderInfo): boolean {
+        return this.router.canReach(from, to);
     }
 
     private handleConnection(socket: net.Socket): void {
@@ -217,81 +231,6 @@ export class SwarmServer {
         const serialized = serialize(relayed);
         for (const recipient of recipients) {
             this.sendToSocket(recipient.socket, serialized);
-        }
-    }
-
-    /**
-     * Determine valid recipients for a message based on routing rules:
-     *
-     * - Agent → own swarm siblings + own coordinator
-     * - Coordinator → own agents + other coordinators + queen
-     * - Queen → anyone
-     *
-     * Instruct messages use `to` and `swarm` fields for targeting.
-     * Other messages broadcast to all allowed recipients (excluding sender).
-     */
-    getRecipients(from: SenderInfo, msg: ClientMessage): ClientConnection[] {
-        const recipients: ClientConnection[] = [];
-
-        if (msg.type === "instruct") {
-            const instruct = msg as InstructMessage;
-            // Targeted delivery
-            for (const client of this.clients.values()) {
-                if (client.name === from.name) continue;
-                if (!this.canReach(from, client)) continue;
-
-                if (instruct.to) {
-                    // Specific agent
-                    if (client.name === instruct.to) {
-                        recipients.push(client);
-                    }
-                } else if (instruct.swarm) {
-                    // All in a swarm
-                    if (client.swarm === instruct.swarm) {
-                        recipients.push(client);
-                    }
-                } else {
-                    // Broadcast to all reachable
-                    recipients.push(client);
-                }
-            }
-        } else {
-            // Broadcast to all allowed recipients
-            for (const client of this.clients.values()) {
-                if (client.name === from.name) continue;
-                if (this.canReach(from, client)) {
-                    recipients.push(client);
-                }
-            }
-        }
-
-        return recipients;
-    }
-
-    /**
-     * Check if `from` is allowed to send messages to `to`.
-     */
-    canReach(from: SenderInfo, to: SenderInfo): boolean {
-        switch (from.role) {
-            case "queen":
-                // Queen can reach anyone
-                return true;
-
-            case "coordinator":
-                // Coordinator can reach: own agents, other coordinators, queen
-                if (to.role === "queen") return true;
-                if (to.role === "coordinator") return true;
-                if (to.role === "agent" && to.swarm === from.swarm) return true;
-                return false;
-
-            case "agent":
-                // Agent can reach: own swarm siblings (agents), own coordinator
-                if (to.role === "agent" && to.swarm === from.swarm) return true;
-                if (to.role === "coordinator" && to.swarm === from.swarm) return true;
-                return false;
-
-            default:
-                return false;
         }
     }
 
