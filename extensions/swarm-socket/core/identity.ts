@@ -43,6 +43,14 @@ export function getIdentity(): Identity {
 }
 
 /**
+ * Get the socket path from environment. Returns undefined if not in a swarm.
+ * Centralizes PI_SWARM_SOCKET access so no other file reads it directly.
+ */
+export function getSocketPath(): string | undefined {
+    return process.env.PI_SWARM_SOCKET || undefined;
+}
+
+/**
  * Reset identity (for testing only).
  */
 export function resetIdentity(): void {
