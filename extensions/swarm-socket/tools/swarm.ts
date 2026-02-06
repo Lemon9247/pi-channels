@@ -28,6 +28,7 @@ import {
     parseSubRelay,
     getParentClient,
 } from "../core/state.js";
+import { getIdentity } from "../core/identity.js";
 import { createHiveMindFile } from "../core/prompts.js";
 import { spawnAgent } from "../core/spawn.js";
 import { discoverAgents } from "../core/agents.js";
@@ -261,7 +262,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
             }
 
             // My code in the hierarchy (queen="0", coordinators="0.1", etc.)
-            const myCode = process.env.PI_SWARM_CODE || "0";
+            const myCode = getIdentity().code;
 
             // Build agent info with hierarchical codes
             const agentMap = new Map<string, AgentInfo>();

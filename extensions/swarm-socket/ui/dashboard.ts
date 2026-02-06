@@ -25,18 +25,6 @@ function statusIcon(status: AgentStatus): string {
     }
 }
 
-function statusColor(status: AgentStatus): string {
-    switch (status) {
-        case "starting": return "muted";
-        case "running": return "accent";
-        case "done": return "success";
-        case "blocked": return "warning";
-        case "disconnected": return "error";
-        case "crashed": return "error";
-        default: return "dim";
-    }
-}
-
 /**
  * Summarize agent statuses from a list of agents.
  */
