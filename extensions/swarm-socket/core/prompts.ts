@@ -2,58 +2,29 @@
  * System Prompt Generation
  *
  * Creates system prompts for swarm agents and coordinators.
- * Also handles hive-mind file template creation.
+ * File scaffolding has moved to core/scaffold.ts — this module
+ * only handles prompt construction.
  */
 
-import * as fs from "node:fs";
-import * as path from "node:path";
-import type { AgentInfo } from "./state.js";
+import type { AgentFiles } from "./scaffold.js";
 
-export function createHiveMindFile(hiveMindPath: string, overview: string | undefined, agents: AgentInfo[]): void {
-    // Don't overwrite an existing hive-mind file — a parent swarm may have created it
-    if (fs.existsSync(hiveMindPath)) {
-        return;
+export function createSwarmSystemPrompt(agentName: string, role: string = "agent", agentFiles?: AgentFiles): string {
+    // Build file paths section
+    let filePathsSection = "";
+    if (agentFiles) {
+        const lines: string[] = [];
+        lines.push(`The hive-mind file is at: ${agentFiles.hiveMindPath}`);
+        lines.push(`Your report file is at: ${agentFiles.reportPath}`);
+        if (agentFiles.crossSwarmPath) {
+            lines.push(`Cross-swarm findings file: ${agentFiles.crossSwarmPath}`);
+        }
+        if (agentFiles.synthesisPath) {
+            lines.push(`Synthesis file: ${agentFiles.synthesisPath}`);
+        }
+        filePathsSection = lines.join("\n");
+    } else {
+        filePathsSection = "No task directory was specified for this swarm.";
     }
-
-    const title = overview || "Swarm Task";
-    const agentList = agents
-        .map((a) => `- **${a.name}** (${a.role}, swarm: ${a.swarm}): ${a.task}`)
-        .join("\n");
-    const statusList = agents.map((a) => `- [ ] ${a.name}`).join("\n");
-
-    const content = `# Hive Mind: ${title}
-
-## Task Overview
-${overview || "(No overview provided)"}
-
-## Agents
-${agentList}
-
-## Findings
-(Agents: add your discoveries here. Be specific — file paths, line numbers, code snippets.)
-
-## Questions
-(Post questions here. Check back for answers from other agents.)
-
-## Blockers
-(If blocked, post here AND call hive_blocker.)
-
-## Status
-${statusList}
-`;
-
-    // Create parent directory if needed
-    const dir = path.dirname(hiveMindPath);
-    if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-    }
-    fs.writeFileSync(hiveMindPath, content, "utf-8");
-}
-
-export function createSwarmSystemPrompt(hiveMindPath: string | undefined, agentName: string, role: string = "agent"): string {
-    const hiveMindSection = hiveMindPath
-        ? `The hive-mind file is at: ${hiveMindPath}`
-        : "No hive-mind file was specified for this swarm.";
 
     return `
 ## Swarm Coordination
@@ -65,7 +36,7 @@ You are **${agentName}**, part of a coordinated swarm. You have four coordinatio
 - **hive_done** — When your task is complete, call this with a one-line summary. This should be the LAST thing you do.
 - **hive_progress** — Report your current progress (phase, percent, detail). Fire-and-forget. Helps the dashboard and coordinator track what you're doing.
 
-${hiveMindSection}
+${filePathsSection}
 
 **Be proactive**: Update the hive-mind early and often. Nudge after every significant finding. When you receive a notification from a teammate, check the hive-mind — they found something that may affect your work.
 
@@ -92,7 +63,11 @@ You are a **coordinator** — you spawn and manage sub-agents, then synthesize t
 **Relay instructions down**: If the queen sends an instruction targeting one of your agents, use \`swarm_instruct\` to forward it.
 
 **Sub-agent relays**: When your agents register, complete, or signal blockers, those events are automatically relayed to the queen as first-class relay messages. You don't need to manually forward status updates.
-
+${agentFiles?.crossSwarmPath ? `
+**Cross-swarm findings**: Write discoveries that affect other swarms to: ${agentFiles.crossSwarmPath}
+` : ""}${agentFiles?.synthesisPath ? `
+**Synthesis**: After all your agents complete, write a synthesis of their reports to: ${agentFiles.synthesisPath}
+` : ""}
 ## Peer Communication
 
 You can reach other coordinators directly:

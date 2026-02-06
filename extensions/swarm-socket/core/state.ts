@@ -74,7 +74,7 @@ export interface SwarmState {
     server: SwarmServer | null; // null if we're reusing existing socket (coordinator)
     socketPath: string;
     agents: Map<string, AgentInfo>;
-    hiveMindPath?: string;
+    taskDirPath?: string;
 
     // Callbacks for the extension to hook into
     onAgentDone?: (agentName: string, summary: string) => void;

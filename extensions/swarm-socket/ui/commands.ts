@@ -153,8 +153,8 @@ function printOverview(pi: ExtensionAPI, state: ReturnType<typeof getSwarmState>
     if (blocked > 0) text += ` • ${blocked} blocked`;
     text += "\n";
 
-    if (state.hiveMindPath) {
-        text += `Hive: \`${state.hiveMindPath}\`\n`;
+    if (state.taskDirPath) {
+        text += `Task dir: \`${state.taskDirPath}\`\n`;
     }
     text += "\n";
 

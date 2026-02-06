@@ -58,8 +58,8 @@ export function registerStatusTool(pi: ExtensionAPI): void {
             if (failed > 0) report += ` | Failed: ${failed}`;
             report += "\n\n";
 
-            if (state.hiveMindPath) {
-                report += `**Hive-mind:** ${state.hiveMindPath}\n\n`;
+            if (state.taskDirPath) {
+                report += `**Task dir:** ${state.taskDirPath}\n\n`;
             }
 
             // Tree view using hierarchical codes

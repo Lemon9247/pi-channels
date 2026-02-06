@@ -11,6 +11,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { createSwarmSystemPrompt } from "./prompts.js";
 import { type AgentConfig } from "./agents.js";
+import type { AgentFiles } from "./scaffold.js";
 
 export function writePromptToTempFile(name: string, prompt: string): { dir: string; filePath: string } {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-swarm-"));
@@ -33,10 +34,11 @@ export function spawnAgent(
         cwd?: string;
     },
     socketPath: string,
-    hiveMindPath: string | undefined,
+    taskDirPath: string | undefined,
     defaultCwd: string,
     code: string,
     knownAgents?: Map<string, AgentConfig>,
+    agentFiles?: AgentFiles,
 ): { process: ChildProcess; tmpDir?: string } {
     // Clone to avoid mutating caller's params
     agentDef = { ...agentDef };
@@ -74,7 +76,7 @@ export function spawnAgent(
     if (agentDef.systemPrompt) {
         systemPrompt = agentDef.systemPrompt + "\n\n";
     }
-    systemPrompt += createSwarmSystemPrompt(hiveMindPath, agentDef.name, agentDef.role);
+    systemPrompt += createSwarmSystemPrompt(agentDef.name, agentDef.role, agentFiles);
 
     const { dir: tmpDir, filePath: tmpPromptPath } = writePromptToTempFile(agentDef.name, systemPrompt);
     args.push("--append-system-prompt", tmpPromptPath);
@@ -83,7 +85,7 @@ export function spawnAgent(
     args.push(`Task: ${agentDef.task}`);
 
     // Environment variables for socket connection
-    const env = {
+    const env: Record<string, string | undefined> = {
         ...process.env,
         PI_SWARM_SOCKET: socketPath,
         PI_SWARM_AGENT_NAME: agentDef.name,
@@ -91,6 +93,11 @@ export function spawnAgent(
         PI_SWARM_AGENT_SWARM: agentDef.swarm,
         PI_SWARM_CODE: code,
     };
+
+    // Pass task dir to coordinators so they can scaffold subdirectories
+    if (taskDirPath && agentDef.role === "coordinator") {
+        env.PI_SWARM_TASK_DIR = taskDirPath;
+    }
 
     const proc = spawn("pi", args, {
         cwd: agentDef.cwd || defaultCwd,
