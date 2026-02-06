@@ -78,15 +78,10 @@ export class SwarmClient extends EventEmitter {
         this._connected = true;
 
         return new Promise((resolve, reject) => {
-            // Send registration
-            this.send({
-                type: "register",
-                name: this.options.name,
-                role: this.options.role,
-                swarm: this.options.swarm,
-            });
+            let registrationDone = false;
 
-            // Wait for registered confirmation or error
+            // Register data handler BEFORE sending — with synchronous transports
+            // (InMemoryTransport), the response arrives during the write() call.
             const onData = (data: string) => {
                 this.buffer += data;
                 const { messages, remainder } = parseLines(this.buffer);
@@ -97,8 +92,7 @@ export class SwarmClient extends EventEmitter {
 
                     if ((msg as RegisteredMessage).type === "registered") {
                         this._registered = true;
-                        // Switch to normal message handling — replace the registration data handler
-                        // Note: Transport.onData appends handlers, so we track state to skip in the registration handler
+                        // Switch to normal message handling
                         this.transport!.onData((d) => this.handleData(d));
                         registrationDone = true;
                         resolve();
@@ -113,7 +107,6 @@ export class SwarmClient extends EventEmitter {
                 }
             };
 
-            let registrationDone = false;
             transport.onData((data) => {
                 if (!registrationDone) {
                     onData(data);
@@ -132,6 +125,14 @@ export class SwarmClient extends EventEmitter {
                 this._connected = false;
                 this._registered = false;
                 this.emit("disconnect");
+            });
+
+            // Send registration AFTER handlers are set up
+            this.send({
+                type: "register",
+                name: this.options.name,
+                role: this.options.role,
+                swarm: this.options.swarm,
             });
         });
     }
