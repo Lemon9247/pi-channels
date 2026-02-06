@@ -78,6 +78,16 @@ export function setupNotifications(pi: ExtensionAPI, client: SwarmClient): void 
                 // Don't inject into context — tracked via state
                 break;
             }
+
+            case "relay": {
+                // Relay messages are handled by the swarm tool, not by individual agents
+                break;
+            }
+
+            case "progress": {
+                // Progress messages are informational — tracked via dashboard/activity
+                break;
+            }
         }
     });
 
