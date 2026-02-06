@@ -135,7 +135,6 @@ You are a **coordinator** — you spawn and manage sub-agents, then synthesize t
 You can reach other coordinators directly:
 - **hive_notify** broadcasts to all peer coordinators and the queen automatically.
 - **swarm_instruct** can target a peer coordinator by name. If the target isn't on your local socket, the instruction is routed through the parent socket to reach peers.
-- Read the cross-swarm file and peer swarm directories for findings from other swarms.
 ` : ""}`;
 }
 

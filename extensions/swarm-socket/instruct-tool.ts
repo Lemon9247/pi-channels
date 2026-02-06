@@ -89,7 +89,7 @@ export function registerInstructTool(pi: ExtensionAPI): void {
                 if (parentClient && parentClient.connected) {
                     parentClient.instruct(params.instruction, params.to, params.swarm);
                     return {
-                        content: [{ type: "text", text: `Instruction routed via parent socket to "${params.to || params.swarm || "all"}"` }],
+                        content: [{ type: "text", text: `Instruction forwarded via parent socket to "${params.to || params.swarm || "all"}" (delivery not confirmed — async routing)` }],
                         details: { target: params.to || params.swarm || "all", routed: true },
                     };
                 }
