@@ -124,10 +124,10 @@ export function registerSwarmCommand(pi: ExtensionAPI): void {
                 } as RelayedMessage);
                 for (const client of state.server!.getClients().values()) {
                     try {
-                        if (!client.socket.destroyed) {
-                            client.socket.write(msg);
+                        if (client.transport.connected) {
+                            client.transport.write(msg);
                         }
-                    } catch { /* socket may have closed */ }
+                    } catch { /* transport may have closed */ }
                 }
             };
 

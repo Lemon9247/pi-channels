@@ -16,6 +16,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { SwarmServer } from "../core/server.js";
+import { UnixTransportServer } from "../transport/unix-socket.js";
 import {
     type AgentInfo,
     type SwarmState,
@@ -180,7 +181,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
 
             {
                 socketPath = generateSocketPath();
-                server = new SwarmServer(socketPath, {
+                server = new SwarmServer(new UnixTransportServer(socketPath), {
                     onRegister: (client) => {
                         if (getSwarmGeneration() !== gen) return;
                         updateAgentStatus(client.name, "running");

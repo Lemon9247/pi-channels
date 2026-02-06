@@ -5,13 +5,14 @@
 import { test, assert, assertEqual, tmpSocketPath, delay, summarize } from "../helpers.js";
 import { SwarmServer } from "../../core/server.js";
 import { SwarmClient } from "../../core/client.js";
+import { UnixTransportServer } from "../../transport/unix-socket.js";
 
 async function main() {
     console.log("\nCross-Coordinator Instruct:");
 
     await test("coordinator instruct reaches peer coordinator via parent socket", async () => {
         const queenSock = tmpSocketPath();
-        const queenServer = new SwarmServer(queenSock);
+        const queenServer = new SwarmServer(new UnixTransportServer(queenSock));
         await queenServer.start();
 
         const coordA = new SwarmClient({ name: "coord-a", role: "coordinator", swarm: "alpha" });
@@ -36,7 +37,7 @@ async function main() {
 
     await test("coordinator instruct broadcast reaches peers and queen via parent socket", async () => {
         const queenSock = tmpSocketPath();
-        const queenServer = new SwarmServer(queenSock);
+        const queenServer = new SwarmServer(new UnixTransportServer(queenSock));
         await queenServer.start();
 
         const queen = new SwarmClient({ name: "queen", role: "queen" });
@@ -71,7 +72,7 @@ async function main() {
 
     await test("coordinator instruct targeting unknown agent forwards to peer coordinators", async () => {
         const queenSock = tmpSocketPath();
-        const queenServer = new SwarmServer(queenSock);
+        const queenServer = new SwarmServer(new UnixTransportServer(queenSock));
         await queenServer.start();
 
         const coordA = new SwarmClient({ name: "coord-a", role: "coordinator", swarm: "alpha" });
@@ -97,7 +98,7 @@ async function main() {
 
     await test("coordinator instruct does NOT reach agents in other swarm", async () => {
         const queenSock = tmpSocketPath();
-        const queenServer = new SwarmServer(queenSock);
+        const queenServer = new SwarmServer(new UnixTransportServer(queenSock));
         await queenServer.start();
 
         const coordA = new SwarmClient({ name: "coord-a", role: "coordinator", swarm: "alpha" });
@@ -123,7 +124,7 @@ async function main() {
 
     await test("coordinator instruct targets swarm of own agents only", async () => {
         const queenSock = tmpSocketPath();
-        const queenServer = new SwarmServer(queenSock);
+        const queenServer = new SwarmServer(new UnixTransportServer(queenSock));
         await queenServer.start();
 
         const coordA = new SwarmClient({ name: "coord-a", role: "coordinator", swarm: "alpha" });

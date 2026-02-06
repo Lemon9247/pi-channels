@@ -15,6 +15,7 @@ import {
     gracefulShutdown,
 } from "../../core/state.js";
 import { SwarmServer } from "../../core/server.js";
+import { UnixTransportServer } from "../../transport/unix-socket.js";
 
 async function main() {
     console.log("\nRelay Protocol:");
@@ -127,7 +128,7 @@ async function main() {
 
     await test("gracefulShutdown waits for agents to finish then cleans up", async () => {
         const sock = tmpSocketPath();
-        const server = new SwarmServer(sock);
+        const server = new SwarmServer(new UnixTransportServer(sock));
         await server.start();
 
         const agents = new Map<string, AgentInfo>();
@@ -158,7 +159,7 @@ async function main() {
 
     await test("gracefulShutdown aborts if swarm replaced during wait", async () => {
         const sock1 = tmpSocketPath();
-        const server1 = new SwarmServer(sock1);
+        const server1 = new SwarmServer(new UnixTransportServer(sock1));
         await server1.start();
 
         const agents = new Map<string, AgentInfo>();
@@ -177,7 +178,7 @@ async function main() {
         setTimeout(async () => {
             await cleanupSwarm();
             const sock2 = tmpSocketPath();
-            const server2 = new SwarmServer(sock2);
+            const server2 = new SwarmServer(new UnixTransportServer(sock2));
             await server2.start();
             const state2: SwarmState = {
                 generation: 0,
