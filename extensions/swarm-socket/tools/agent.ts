@@ -19,11 +19,28 @@ export function registerAgentTools(pi: ExtensionAPI, client: SwarmClient): void 
         description:
             "Nudge your swarm teammates to check the hive-mind file. " +
             "Call this AFTER updating the hive-mind with your findings. " +
-            "The reason should be a short label — put details in the hive-mind file.",
+            "The reason should be a short label — put details in the hive-mind file. " +
+            "Optional payload fields add context so recipients can triage without file I/O. " +
+            "Optional 'to' field sends only to a specific agent by name.",
         parameters: Type.Object({
             reason: Type.String({
                 description: "Brief description of what you added to the hive-mind",
             }),
+            to: Type.Optional(Type.String({
+                description: "Send only to a specific agent by name (omit to broadcast)",
+            })),
+            file: Type.Optional(Type.String({
+                description: "File path that was updated",
+            })),
+            snippet: Type.Optional(Type.String({
+                description: "Short excerpt of what was added",
+            })),
+            section: Type.Optional(Type.String({
+                description: "Hive-mind section that was updated",
+            })),
+            tags: Type.Optional(Type.Array(Type.String(), {
+                description: "Topic tags for interest-based filtering",
+            })),
         }),
         async execute(_toolCallId, params) {
             if (!client.connected) {
@@ -34,9 +51,20 @@ export function registerAgentTools(pi: ExtensionAPI, client: SwarmClient): void 
                 };
             }
             try {
-                client.nudge(params.reason);
+                const payload: Record<string, unknown> = {};
+                if (params.file) payload.file = params.file;
+                if (params.snippet) payload.snippet = params.snippet;
+                if (params.section) payload.section = params.section;
+                if (params.tags) payload.tags = params.tags;
+                const hasPayload = Object.keys(payload).length > 0;
+
+                client.nudge(params.reason, {
+                    to: params.to,
+                    payload: hasPayload ? payload as any : undefined,
+                });
+                const target = params.to ? ` → ${params.to}` : "";
                 return {
-                    content: [{ type: "text", text: `Nudge sent: "${params.reason}"` }],
+                    content: [{ type: "text", text: `Nudge sent${target}: "${params.reason}"` }],
                     details: {},
                 };
             } catch (err) {
@@ -48,12 +76,12 @@ export function registerAgentTools(pi: ExtensionAPI, client: SwarmClient): void 
             }
         },
         renderCall(args, theme) {
-            return new Text(
-                theme.fg("toolTitle", theme.bold("hive_notify ")) +
-                    theme.fg("dim", args.reason || "..."),
-                0,
-                0,
-            );
+            let text = theme.fg("toolTitle", theme.bold("hive_notify ")) +
+                theme.fg("dim", args.reason || "...");
+            if (args.to) {
+                text += theme.fg("accent", ` → ${args.to}`);
+            }
+            return new Text(text, 0, 0);
         },
         renderResult(result, _opts, theme) {
             const text = result.content[0];

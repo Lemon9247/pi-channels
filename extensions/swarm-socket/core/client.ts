@@ -131,22 +131,36 @@ export class SwarmClient extends EventEmitter {
     /**
      * Send a nudge to notify swarm of hive-mind update.
      */
-    nudge(reason: string): void {
-        this.send({ type: "nudge", reason });
+    nudge(reason: string, options?: { to?: string; swarm?: string; payload?: import("../transport/protocol.js").NudgePayload }): void {
+        this.send({ type: "nudge", reason, ...options });
     }
 
     /**
      * Signal a blocker.
      */
-    blocker(description: string): void {
-        this.send({ type: "blocker", description });
+    blocker(description: string, options?: { to?: string; swarm?: string }): void {
+        this.send({ type: "blocker", description, ...options });
     }
 
     /**
      * Signal task completion.
      */
-    done(summary: string): void {
-        this.send({ type: "done", summary });
+    done(summary: string, options?: { to?: string; swarm?: string }): void {
+        this.send({ type: "done", summary, ...options });
+    }
+
+    /**
+     * Send a relay message (first-class sub-agent event).
+     */
+    relay(relay: import("../transport/protocol.js").RelayEvent): void {
+        this.send({ type: "relay", relay });
+    }
+
+    /**
+     * Send a progress update.
+     */
+    progress(options: { phase?: string; percent?: number; detail?: string }): void {
+        this.send({ type: "progress", ...options });
     }
 
     /**

@@ -13,7 +13,7 @@
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { SwarmClient } from "../core/client.js";
-import type { RelayedMessage } from "../transport/protocol.js";
+import type { RelayedMessage, NudgeMessage } from "../transport/protocol.js";
 
 export function setupNotifications(pi: ExtensionAPI, client: SwarmClient): void {
     client.on("message", (relayed: RelayedMessage) => {
@@ -51,9 +51,18 @@ export function setupNotifications(pi: ExtensionAPI, client: SwarmClient): void 
             }
 
             case "nudge": {
-                const text =
-                    `🔔 **Nudge from ${from}** (${fromRole}): ${message.reason}\n\n` +
-                    `Check the hive-mind file — another agent found something that may affect your work.`;
+                const nudge = message as NudgeMessage;
+                let text =
+                    `🔔 **Nudge from ${from}** (${fromRole}): ${nudge.reason}\n\n`;
+                if (nudge.payload) {
+                    const parts: string[] = [];
+                    if (nudge.payload.section) parts.push(`Section: ${nudge.payload.section}`);
+                    if (nudge.payload.file) parts.push(`File: \`${nudge.payload.file}\``);
+                    if (nudge.payload.snippet) parts.push(`> ${nudge.payload.snippet}`);
+                    if (nudge.payload.tags?.length) parts.push(`Tags: ${nudge.payload.tags.join(", ")}`);
+                    if (parts.length > 0) text += parts.join("\n") + "\n\n";
+                }
+                text += `Check the hive-mind file — another agent found something that may affect your work.`;
                 pi.sendMessage(
                     {
                         customType: "swarm-nudge",
