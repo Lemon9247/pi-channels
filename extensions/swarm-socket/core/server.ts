@@ -20,7 +20,15 @@ import {
     validateClientMessage,
 } from "../transport/protocol.js";
 import type { Transport, TransportServer } from "../transport/types.js";
-import { type SenderInfo, type Router, DefaultRouter } from "./router.js";
+import {
+    type SenderInfo,
+    type Subject,
+    type Router,
+    type SubscriptionPolicy,
+    DefaultRouter,
+    DefaultPolicy,
+    computeSubjects,
+} from "./router.js";
 
 export { type SenderInfo } from "./router.js";
 
@@ -28,6 +36,10 @@ export interface ClientConnection extends SenderInfo {
     transport: Transport;
     buffer: string;
     registered: boolean;
+    /** Subjects this client subscribes to (computed on registration) */
+    subscriptions: Subject[];
+    /** Subjects this client can publish to (computed on registration) */
+    publications: Subject[];
 }
 
 export type ServerEventHandler = {
@@ -43,11 +55,13 @@ export class SwarmServer {
     private unregistered: Set<Transport> = new Set();
     private handlers: ServerEventHandler;
     private router: Router;
+    private policy: SubscriptionPolicy;
 
-    constructor(transportServer: TransportServer, handlers: ServerEventHandler = {}, router?: Router) {
+    constructor(transportServer: TransportServer, handlers: ServerEventHandler = {}, router?: Router, policy?: SubscriptionPolicy) {
         this.transportServer = transportServer;
         this.handlers = handlers;
-        this.router = router || new DefaultRouter();
+        this.policy = policy || new DefaultPolicy();
+        this.router = router || new DefaultRouter(this.policy);
         this.transportServer.onConnection((transport) => this.handleConnection(transport));
     }
 
@@ -165,6 +179,12 @@ export class SwarmServer {
             return;
         }
 
+        // Compute subscriptions and publications from the policy
+        const { subscriptions, publications } = computeSubjects(
+            { name: msg.name, role: msg.role, swarm: msg.swarm },
+            this.policy,
+        );
+
         const client: ClientConnection = {
             transport,
             name: msg.name,
@@ -172,6 +192,8 @@ export class SwarmServer {
             swarm: msg.swarm,
             buffer: preClient.buffer,
             registered: true,
+            subscriptions,
+            publications,
         };
 
         this.clients.set(msg.name, client);
@@ -200,9 +222,7 @@ export class SwarmServer {
         }
 
         const relayed: RelayedMessage = {
-            from: from.name,
-            fromRole: from.role,
-            fromSwarm: from.swarm,
+            from: { name: from.name, role: from.role, swarm: from.swarm },
             message: msg as RelayedMessage["message"],
         };
 

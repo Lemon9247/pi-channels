@@ -28,7 +28,8 @@ async function main() {
 
         assertEqual(receivedB.length, 1, "coord-b received instruct");
         assertEqual(receivedB[0].message.instruction, "check your agents for auth bugs", "instruction content");
-        assertEqual(receivedB[0].from, "coord-a", "from coord-a");
+        assertEqual(receivedB[0].from.name, "coord-a", "from coord-a");
+        assertEqual(receivedB[0].from.role, "coordinator", "from role");
 
         coordA.disconnect();
         coordB.disconnect();

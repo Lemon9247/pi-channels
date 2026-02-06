@@ -166,7 +166,7 @@ async function main() {
         await delay(10);
 
         assertEqual(received.length, 1, "a2 received nudge");
-        assertEqual(received[0].from, "a1", "from a1");
+        assertEqual(received[0].from.name, "a1", "from a1");
         assertEqual(received[0].message.reason, "in-memory nudge", "correct reason");
 
         a1.disconnect();

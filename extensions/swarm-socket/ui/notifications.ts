@@ -17,12 +17,15 @@ import type { RelayedMessage } from "../transport/protocol.js";
 
 export function setupNotifications(pi: ExtensionAPI, client: SwarmClient): void {
     client.on("message", (relayed: RelayedMessage) => {
-        const { from, fromRole, message } = relayed;
+        const { from, message } = relayed;
+        // from is now a MessageSender object with name, role, swarm
+        const senderName = typeof from === "string" ? from : from.name;
+        const senderRole = typeof from === "string" ? (relayed as any).fromRole : from.role;
 
         switch (message.type) {
             case "blocker": {
                 const text =
-                    `⚠️ **Blocker from ${from}** (${fromRole}): ${message.description}\n\n` +
+                    `⚠️ **Blocker from ${senderName}** (${senderRole}): ${message.description}\n\n` +
                     `Check the hive-mind file for details. Consider if this affects your work.`;
                 pi.sendMessage(
                     {
@@ -37,7 +40,7 @@ export function setupNotifications(pi: ExtensionAPI, client: SwarmClient): void 
 
             case "instruct": {
                 const text =
-                    `📋 **Instruction from ${from}** (${fromRole}): ${message.instruction}\n\n` +
+                    `📋 **Instruction from ${senderName}** (${senderRole}): ${message.instruction}\n\n` +
                     `Adjust your approach based on this instruction.`;
                 pi.sendMessage(
                     {
@@ -52,7 +55,7 @@ export function setupNotifications(pi: ExtensionAPI, client: SwarmClient): void 
 
             case "nudge": {
                 const text =
-                    `🔔 **Nudge from ${from}** (${fromRole}): ${message.reason}\n\n` +
+                    `🔔 **Nudge from ${senderName}** (${senderRole}): ${message.reason}\n\n` +
                     `Check the hive-mind file — another agent found something that may affect your work.`;
                 pi.sendMessage(
                     {

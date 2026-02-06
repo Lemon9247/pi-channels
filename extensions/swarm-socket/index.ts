@@ -17,7 +17,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { SwarmClient } from "./core/client.js";
-import { createIdentity } from "./core/identity.js";
+import { createIdentity, getSocketPath } from "./core/identity.js";
 import { registerSwarmTool } from "./tools/swarm.js";
 import { registerInstructTool } from "./tools/instruct.js";
 import { registerStatusTool } from "./tools/status.js";
@@ -62,11 +62,10 @@ export default function (pi: ExtensionAPI) {
     const identity = createIdentity();
 
     // Clean stale sockets on startup (queen mode only)
-    if (!process.env.PI_SWARM_SOCKET) {
+    const socketPath = getSocketPath();
+    if (!socketPath) {
         cleanStaleSockets();
     }
-
-    const socketPath = process.env.PI_SWARM_SOCKET;
 
     if (socketPath && identity.role !== "queen") {
         // We're inside a swarm — connect as client
