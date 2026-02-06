@@ -8,7 +8,7 @@
  * (subject-based addressing in P2A).
  */
 
-import type { Role, ClientMessage, InstructMessage } from "../transport/protocol.js";
+import type { Role, ClientMessage, BaseMessage } from "../transport/protocol.js";
 
 /** Identity fields used for routing — no socket dependency */
 export interface SenderInfo {
@@ -61,22 +61,23 @@ export class DefaultRouter implements Router {
     ): T[] {
         const recipients: T[] = [];
 
-        if (msg.type === "instruct") {
-            const instruct = msg as InstructMessage;
+        // All message types support targeting via to/swarm fields
+        const baseMsg = msg as BaseMessage;
+        const hasTarget = baseMsg.to || baseMsg.swarm;
+
+        if (hasTarget) {
             for (const client of clients.values()) {
                 if (client.name === from.name) continue;
                 if (!this.canReach(from, client)) continue;
 
-                if (instruct.to) {
-                    if (client.name === instruct.to) {
+                if (baseMsg.to) {
+                    if (client.name === baseMsg.to) {
                         recipients.push(client);
                     }
-                } else if (instruct.swarm) {
-                    if (client.swarm === instruct.swarm) {
+                } else if (baseMsg.swarm) {
+                    if (client.swarm === baseMsg.swarm) {
                         recipients.push(client);
                     }
-                } else {
-                    recipients.push(client);
                 }
             }
         } else {

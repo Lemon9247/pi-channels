@@ -12,7 +12,7 @@ import {
     type ClientMessage,
     type RelayedMessage,
     type RegisterMessage,
-    type InstructMessage,
+    type BaseMessage,
     serialize,
     parseLines,
     validateRegister,
@@ -211,12 +211,13 @@ export class SwarmServer {
         this.handlers.onMessage?.(from, msg);
 
         const recipients = this.getRecipients(from, msg);
-        if (recipients.length === 0 && msg.type === "instruct") {
-            // Instruct with no valid recipients — notify sender
-            const target = (msg as InstructMessage).to || (msg as InstructMessage).swarm || "all";
+        const baseMsg = msg as BaseMessage;
+        if (recipients.length === 0 && (baseMsg.to || baseMsg.swarm)) {
+            // Targeted message with no valid recipients — notify sender
+            const target = baseMsg.to || baseMsg.swarm || "all";
             this.sendToSocket(from.socket, serialize({
                 type: "error",
-                message: `No valid recipients for instruct to "${target}"`,
+                message: `No valid recipients for ${msg.type} to "${target}"`,
             }));
             return;
         }
