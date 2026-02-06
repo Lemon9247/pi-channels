@@ -118,8 +118,7 @@ export function registerSwarmCommand(pi: ExtensionAPI): void {
             // Bypass server routing — broadcast directly to all connected clients.
             const sendInstruct = (instruction: string) => {
                 const msg = serialize({
-                    from: "queen",
-                    fromRole: "queen",
+                    from: { name: "queen", role: "queen" },
                     message: { type: "instruct" as const, instruction },
                 } as RelayedMessage);
                 for (const client of state.server!.getClients().values()) {

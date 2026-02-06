@@ -244,9 +244,7 @@ export class SwarmServer {
         }
 
         const relayed: RelayedMessage = {
-            from: from.name,
-            fromRole: from.role,
-            fromSwarm: from.swarm,
+            from: { name: from.name, role: from.role, swarm: from.swarm },
             message: msg as RelayedMessage["message"],
         };
 

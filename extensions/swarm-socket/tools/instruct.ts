@@ -106,9 +106,7 @@ export function registerInstructTool(pi: ExtensionAPI): void {
 
             // Send to each recipient
             const relayed = {
-                from: identity.name,
-                fromRole: identity.role,
-                fromSwarm: identity.swarm,
+                from: { name: identity.name, role: identity.role, swarm: identity.swarm },
                 message: msg,
             };
             const data = serialize(relayed);

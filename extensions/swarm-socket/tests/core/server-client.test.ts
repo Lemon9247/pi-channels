@@ -72,7 +72,8 @@ async function main() {
         await delay(50);
 
         assertEqual(received.length, 1, "a2 received 1 message");
-        assertEqual(received[0].from, "a1", "from a1");
+        assertEqual(received[0].from.name, "a1", "from a1");
+        assertEqual(received[0].from.role, "agent", "from role");
         assertEqual(received[0].message.type, "nudge", "nudge type");
         assertEqual(received[0].message.reason, "found something", "reason");
 

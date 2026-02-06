@@ -53,12 +53,19 @@ export interface RegisteredMessage {
     type: "registered";
 }
 
+// === Sender Identity (embedded in relayed messages) ===
+
+/** Identity of the message sender, carried in every relayed message */
+export interface MessageSender {
+    name: string;
+    role: Role;
+    swarm?: string;
+}
+
 // === Relayed wrapper ===
 
 export interface RelayedMessage {
-    from: string;
-    fromRole: Role;
-    fromSwarm?: string;
+    from: MessageSender;
     message: NudgeMessage | BlockerMessage | DoneMessage | InstructMessage;
 }
 
@@ -132,5 +139,12 @@ export function validateClientMessage(msg: unknown): msg is ClientMessage {
 export function isRelayedMessage(msg: unknown): msg is RelayedMessage {
     if (!msg || typeof msg !== "object") return false;
     const m = msg as Record<string, unknown>;
-    return typeof m.from === "string" && typeof m.fromRole === "string" && m.message != null;
+    // from is now a MessageSender object (or a string for backward compat)
+    if (m.message == null) return false;
+    if (typeof m.from === "object" && m.from !== null) {
+        const from = m.from as Record<string, unknown>;
+        return typeof from.name === "string" && typeof from.role === "string";
+    }
+    // Backward compatibility: old format with from as string
+    return typeof m.from === "string" && typeof m.fromRole === "string";
 }
