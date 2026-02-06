@@ -22,9 +22,14 @@ export interface AgentInfo {
     process?: ChildProcess;
     doneSummary?: string;
     blockerDescription?: string;
+    progressPhase?: string;    // Current phase from ProgressMessage
+    progressPercent?: number;  // 0-100 from ProgressMessage
+    progressDetail?: string;   // Status line from ProgressMessage
 }
 
-/** Sub-agent relay payload — JSON-encoded in nudge reason field */
+import type { RelayEvent } from "../transport/protocol.js";
+
+/** @deprecated Use RelayEvent from protocol.ts instead. Kept for backward compat parsing. */
 export interface SubAgentRelay {
     sub: true;
     type: "register" | "done" | "blocked" | "nudge" | "disconnected";
@@ -37,7 +42,10 @@ export interface SubAgentRelay {
     reason?: string;
 }
 
-/** Try to parse a nudge reason as a sub-agent relay. Returns null if not a relay. */
+/**
+ * Try to parse a nudge reason as a sub-agent relay (old format).
+ * Returns null if not a relay. Kept as backward-compat fallback.
+ */
 export function parseSubRelay(reason: string): SubAgentRelay | null {
     if (!reason.startsWith("{")) return null;
     try {
@@ -45,6 +53,20 @@ export function parseSubRelay(reason: string): SubAgentRelay | null {
         if (obj && obj.sub === true) return obj as SubAgentRelay;
     } catch { /* not JSON */ }
     return null;
+}
+
+/** Convert old SubAgentRelay to new RelayEvent format */
+export function subRelayToRelayEvent(relay: SubAgentRelay): RelayEvent {
+    return {
+        event: relay.type,
+        name: relay.name,
+        role: relay.role,
+        swarm: relay.swarm,
+        code: relay.code,
+        summary: relay.summary,
+        description: relay.description,
+        reason: relay.reason,
+    };
 }
 
 export interface SwarmState {

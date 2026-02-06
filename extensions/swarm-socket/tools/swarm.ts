@@ -29,6 +29,7 @@ import {
     parseSubRelay,
     getParentClient,
 } from "../core/state.js";
+import type { RelayEvent, RelayMessage } from "../transport/protocol.js";
 import { getIdentity } from "../core/identity.js";
 import { createHiveMindFile } from "../core/prompts.js";
 import { spawnAgent } from "../core/spawn.js";
@@ -69,14 +70,16 @@ function generateSocketPath(): string {
 }
 
 /**
- * Handle a sub-agent relay message that bubbled up from a coordinator.
+ * Handle a sub-agent relay event that bubbled up from a coordinator.
  * Adds/updates the sub-agent in the queen's state so the dashboard can show it.
  * Also forwards the relay further up if we have a parent (passthrough for deep trees).
+ *
+ * Accepts the new RelayEvent format. Legacy SubAgentRelay is converted before calling this.
  */
-function handleSubAgentRelay(state: SwarmState, relay: SubAgentRelay, ctx: any): void {
+function handleRelayEvent(state: SwarmState, relay: RelayEvent, ctx: any): void {
     const existing = state.agents.get(relay.name);
 
-    if (relay.type === "register") {
+    if (relay.event === "register") {
         if (!existing) {
             state.agents.set(relay.name, {
                 name: relay.name,
@@ -88,7 +91,7 @@ function handleSubAgentRelay(state: SwarmState, relay: SubAgentRelay, ctx: any):
             });
         }
         pushSyntheticEvent(relay.name, "message", `registered (${relay.role}, ${relay.swarm})`);
-    } else if (relay.type === "done") {
+    } else if (relay.event === "done") {
         if (existing) {
             updateAgentStatus(relay.name, "done", { doneSummary: relay.summary });
         } else {
@@ -103,7 +106,7 @@ function handleSubAgentRelay(state: SwarmState, relay: SubAgentRelay, ctx: any):
             });
         }
         pushSyntheticEvent(relay.name, "tool_end", `✓ done: ${relay.summary || "completed"}`);
-    } else if (relay.type === "blocked") {
+    } else if (relay.event === "blocked") {
         if (existing) {
             updateAgentStatus(relay.name, "blocked", { blockerDescription: relay.description });
         } else {
@@ -118,21 +121,21 @@ function handleSubAgentRelay(state: SwarmState, relay: SubAgentRelay, ctx: any):
             });
         }
         pushSyntheticEvent(relay.name, "tool_end", `⚠ blocked: ${relay.description || "unknown"}`);
-    } else if (relay.type === "disconnected") {
+    } else if (relay.event === "disconnected") {
         if (existing) {
             updateAgentStatus(relay.name, "disconnected");
         }
         pushSyntheticEvent(relay.name, "message", "disconnected");
-    } else if (relay.type === "nudge") {
+    } else if (relay.event === "nudge") {
         pushSyntheticEvent(relay.name, "message", `hive-mind: ${relay.reason || ""}`);
     }
 
     updateDashboard(ctx);
 
-    // Passthrough: if we have a parent, forward the relay unchanged (deep trees)
+    // Passthrough: if we have a parent, forward the relay up (deep trees)
     const pc = getParentClient();
     if (pc && pc.connected) {
-        pc.nudge(JSON.stringify(relay));
+        pc.relay(relay);
     }
 }
 
@@ -190,15 +193,13 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                         const pc = getParentClient();
                         if (pc && pc.connected) {
                             const agent = agentMap.get(client.name);
-                            const relay: SubAgentRelay = {
-                                sub: true,
-                                type: "register",
+                            pc.relay({
+                                event: "register",
                                 name: client.name,
                                 role: client.role,
                                 swarm: client.swarm || "unknown",
                                 code: agent?.code || "?",
-                            };
-                            pc.nudge(JSON.stringify(relay));
+                            });
                         }
                     },
                     onMessage: (_from, msg) => {
@@ -214,17 +215,44 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                             const blockerMsg = msg as { type: "blocker"; description: string };
                             updateAgentStatus(_from.name, "blocked", { blockerDescription: blockerMsg.description });
                             state.onBlocker?.(_from.name, blockerMsg.description, _from.name);
+                        } else if (msg.type === "relay") {
+                            // First-class relay message
+                            const relayMsg = msg as RelayMessage;
+                            handleRelayEvent(state, relayMsg.relay, ctx);
                         } else if (msg.type === "nudge") {
                             const nudgeMsg = msg as { type: "nudge"; reason: string };
                             const reason = nudgeMsg.reason;
 
-                            const relay = parseSubRelay(reason);
-                            if (relay) {
-                                handleSubAgentRelay(state, relay, ctx);
+                            // Backward compat: try parsing as legacy JSON-in-nudge relay
+                            const legacyRelay = parseSubRelay(reason);
+                            if (legacyRelay) {
+                                handleRelayEvent(state, {
+                                    event: legacyRelay.type,
+                                    name: legacyRelay.name,
+                                    role: legacyRelay.role,
+                                    swarm: legacyRelay.swarm,
+                                    code: legacyRelay.code,
+                                    summary: legacyRelay.summary,
+                                    description: legacyRelay.description,
+                                    reason: legacyRelay.reason,
+                                }, ctx);
                                 return;
                             }
 
                             state.onNudge?.(reason, _from.name);
+                        } else if (msg.type === "progress") {
+                            // Progress messages: update agent info and activity feed
+                            const progressMsg = msg as { type: "progress"; phase?: string; percent?: number; detail?: string };
+                            const agent = state.agents.get(_from.name);
+                            if (agent) {
+                                if (progressMsg.phase != null) agent.progressPhase = progressMsg.phase;
+                                if (progressMsg.percent != null) agent.progressPercent = progressMsg.percent;
+                                if (progressMsg.detail != null) agent.progressDetail = progressMsg.detail;
+                            }
+                            const detail = progressMsg.detail || progressMsg.phase || "progress";
+                            const pct = progressMsg.percent != null ? ` (${progressMsg.percent}%)` : "";
+                            pushSyntheticEvent(_from.name, "message", `${detail}${pct}`);
+                            updateDashboard(ctx);
                         }
                     },
                     onDisconnect: (client) => {
@@ -237,15 +265,13 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                             updateDashboard(ctx);
                             const pc = getParentClient();
                             if (pc && pc.connected) {
-                                const relay: SubAgentRelay = {
-                                    sub: true,
-                                    type: "disconnected",
+                                pc.relay({
+                                    event: "disconnected",
                                     name: client.name,
                                     role: client.role,
                                     swarm: client.swarm || "unknown",
                                     code: agent.code,
-                                };
-                                pc.nudge(JSON.stringify(relay));
+                                });
                             }
                         }
                     },
@@ -309,13 +335,12 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                 updateDashboard(ctx);
                 if (parentClient && parentClient.connected) {
                     const agent = agentMap.get(agentName);
-                    const relay: SubAgentRelay = {
-                        sub: true, type: "done",
+                    parentClient.relay({
+                        event: "done",
                         name: agentName, role: agent?.role || "agent",
                         swarm: agent?.swarm || "unknown", code: agent?.code || "?",
                         summary,
-                    };
-                    parentClient.nudge(JSON.stringify(relay));
+                    });
                 }
             };
 
@@ -348,13 +373,12 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                 updateDashboard(ctx);
                 if (parentClient && parentClient.connected) {
                     const agent = state.agents.get(agentName);
-                    const relay: SubAgentRelay = {
-                        sub: true, type: "blocked",
+                    parentClient.relay({
+                        event: "blocked",
                         name: agentName, role: agent?.role || "agent",
                         swarm: agent?.swarm || "unknown", code: agent?.code || "?",
                         description,
-                    };
-                    parentClient.nudge(JSON.stringify(relay));
+                    });
                 }
             };
 
@@ -370,13 +394,12 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                 );
                 if (parentClient && parentClient.connected) {
                     const agent = Array.from(state.agents.values()).find(a => a.name === from);
-                    const relay: SubAgentRelay = {
-                        sub: true, type: "nudge",
+                    parentClient.relay({
+                        event: "nudge",
                         name: from, role: agent?.role || "agent",
                         swarm: agent?.swarm || "unknown", code: agent?.code || "?",
                         reason,
-                    };
-                    parentClient.nudge(JSON.stringify(relay));
+                    });
                 }
             };
 

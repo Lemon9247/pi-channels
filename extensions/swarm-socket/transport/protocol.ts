@@ -18,28 +18,71 @@ export interface RegisterMessage {
     swarm?: string; // Required for coordinator and agent roles
 }
 
-// === Bidirectional (relayed by server per routing rules) ===
+// === Base targeting fields (available on all bidirectional messages) ===
 
-export interface NudgeMessage {
-    type: "nudge";
-    reason: string;
+export interface BaseMessage {
+    type: string;
+    to?: string;       // Target specific agent by name
+    swarm?: string;    // Target all agents in a swarm
 }
 
-export interface BlockerMessage {
+// === Nudge payload for structured context ===
+
+export interface NudgePayload {
+    file?: string;        // File path that was updated
+    snippet?: string;     // Short excerpt of what was added
+    section?: string;     // Hive-mind section that was updated
+    tags?: string[];      // Topics — enables interest-based filtering
+}
+
+// === Bidirectional (relayed by server per routing rules) ===
+
+export interface NudgeMessage extends BaseMessage {
+    type: "nudge";
+    reason: string;
+    payload?: NudgePayload;
+}
+
+export interface BlockerMessage extends BaseMessage {
     type: "blocker";
     description: string;
 }
 
-export interface DoneMessage {
+export interface DoneMessage extends BaseMessage {
     type: "done";
     summary: string;
 }
 
-export interface InstructMessage {
+export interface InstructMessage extends BaseMessage {
     type: "instruct";
     instruction: string;
-    to?: string; // Specific agent name
-    swarm?: string; // All agents in a swarm
+}
+
+// === Relay: first-class sub-agent event relay ===
+
+export interface RelayEvent {
+    event: "register" | "done" | "blocked" | "nudge" | "disconnected";
+    name: string;
+    role: string;
+    swarm: string;
+    code: string;
+    summary?: string;
+    description?: string;
+    reason?: string;
+}
+
+export interface RelayMessage extends BaseMessage {
+    type: "relay";
+    relay: RelayEvent;
+}
+
+// === Progress: fire-and-forget status updates ===
+
+export interface ProgressMessage extends BaseMessage {
+    type: "progress";
+    phase?: string;       // "reading files", "running tests", "writing report"
+    percent?: number;     // 0-100 (optional)
+    detail?: string;      // Short status line
 }
 
 // === Server → Client ===
@@ -66,12 +109,12 @@ export interface MessageSender {
 
 export interface RelayedMessage {
     from: MessageSender;
-    message: NudgeMessage | BlockerMessage | DoneMessage | InstructMessage;
+    message: NudgeMessage | BlockerMessage | DoneMessage | InstructMessage | RelayMessage | ProgressMessage;
 }
 
 // === Union types ===
 
-export type ClientMessage = RegisterMessage | NudgeMessage | BlockerMessage | DoneMessage | InstructMessage;
+export type ClientMessage = RegisterMessage | NudgeMessage | BlockerMessage | DoneMessage | InstructMessage | RelayMessage | ProgressMessage;
 export type ServerMessage = ErrorMessage | RegisteredMessage | RelayedMessage;
 
 // === Serialization ===
@@ -131,9 +174,19 @@ export function validateClientMessage(msg: unknown): msg is ClientMessage {
             return typeof m.summary === "string";
         case "instruct":
             return typeof m.instruction === "string";
+        case "relay":
+            return m.relay != null && typeof m.relay === "object";
+        case "progress":
+            // All fields optional — just needs the type
+            return true;
         default:
             return false;
     }
+}
+
+/** Extract targeting fields from any message type */
+export function getMessageTarget(msg: BaseMessage): { to?: string; swarm?: string } {
+    return { to: msg.to, swarm: msg.swarm };
 }
 
 export function isRelayedMessage(msg: unknown): msg is RelayedMessage {
