@@ -1,0 +1,16 @@
+{
+  "name": "pi-swarm",
+  "version": "0.1.0",
+  "description": "Unix socket-based swarm coordination for the pi coding agent — spawn parallel agents with hive-mind coordination, hierarchical topologies, and live dashboards",
+  "keywords": ["pi-package", "swarm", "multi-agent", "coordination"],
+  "license": "MIT",
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*"
+  },
+  "pi": {
+    "extensions": ["extensions"],
+    "skills": ["skills"]
+  }
+}
