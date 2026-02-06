@@ -77,8 +77,8 @@ export function updateDashboard(ctx?: any): void {
     const widgetLines: string[] = [];
 
     widgetLines.push(`🐝 Swarm — ${done}/${total} complete`);
-    if (state.hiveMindPath) {
-        widgetLines.push(`   hive: ${state.hiveMindPath}`);
+    if (state.taskDirPath) {
+        widgetLines.push(`   task: ${state.taskDirPath}`);
     }
 
     // Build tree from hierarchical codes

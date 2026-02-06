@@ -29,7 +29,7 @@ import {
     getParentClient,
 } from "../core/state.js";
 import { getIdentity } from "../core/identity.js";
-import { createHiveMindFile } from "../core/prompts.js";
+import { scaffoldTaskDir, scaffoldCoordinatorSubDir, type ScaffoldResult } from "../core/scaffold.js";
 import { spawnAgent } from "../core/spawn.js";
 import { discoverAgents } from "../core/agents.js";
 import { updateDashboard } from "../ui/dashboard.js";
@@ -52,14 +52,14 @@ const AgentDef = Type.Object({
     cwd: Type.Optional(Type.String({ description: "Working directory for this agent" })),
 });
 
-const HiveMindDef = Type.Object({
-    path: Type.String({ description: "Path to create/find the hive-mind file" }),
-    overview: Type.Optional(Type.String({ description: "Task overview for the hive-mind template" })),
+const TaskDirDef = Type.Object({
+    path: Type.String({ description: "Path to the task directory for swarm coordination files" }),
+    overview: Type.Optional(Type.String({ description: "Task overview for the coordination template" })),
 });
 
 const SwarmParams = Type.Object({
     agents: Type.Array(AgentDef, { description: "Agents to spawn in the swarm" }),
-    hiveMind: Type.Optional(HiveMindDef),
+    taskDir: Type.Optional(TaskDirDef),
 });
 
 function generateSocketPath(): string {
@@ -279,15 +279,29 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                 });
             }
 
-            // Create hive-mind file
-            let hiveMindPath: string | undefined;
-            if (params.hiveMind) {
-                hiveMindPath = params.hiveMind.path;
-                createHiveMindFile(
-                    hiveMindPath,
-                    params.hiveMind.overview,
+            // Scaffold task directory
+            let taskDirPath: string | undefined;
+            let scaffoldResult: ScaffoldResult | undefined;
+            const parentTaskDir = process.env.PI_SWARM_TASK_DIR;
+
+            if (params.taskDir) {
+                // Explicit taskDir — queen case
+                taskDirPath = params.taskDir.path;
+                scaffoldResult = scaffoldTaskDir(
+                    taskDirPath,
+                    params.taskDir.overview,
                     Array.from(agentMap.values()),
                 );
+            } else if (parentTaskDir) {
+                // Coordinator case — derive subdirectory from parent task dir
+                const mySwarm = getIdentity().swarm || "default";
+                scaffoldResult = scaffoldCoordinatorSubDir(
+                    parentTaskDir,
+                    mySwarm,
+                    undefined,
+                    Array.from(agentMap.values()),
+                );
+                taskDirPath = scaffoldResult.taskDirPath;
             }
 
             // Set up state
@@ -296,7 +310,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                 server,
                 socketPath,
                 agents: agentMap,
-                hiveMindPath,
+                taskDirPath,
             };
 
             // Detect if we're a coordinator (have a parent socket to relay to)
@@ -388,7 +402,8 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
             // Spawn all agents
             for (const agentDef of params.agents) {
                 const agentInfo = agentMap.get(agentDef.name)!;
-                const { process: proc } = spawnAgent(agentDef, socketPath, hiveMindPath, ctx.cwd, agentInfo.code, knownAgents);
+                const agentFileInfo = scaffoldResult?.agentFiles.get(agentDef.name);
+                const { process: proc } = spawnAgent(agentDef, socketPath, taskDirPath, ctx.cwd, agentInfo.code, knownAgents, agentFileInfo);
 
                 agentInfo.process = proc;
 
@@ -478,7 +493,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                         text:
                             `Swarm started with ${params.agents.length} agent(s):\n${agentList}\n\n` +
                             `Socket: ${socketPath}\n` +
-                            (hiveMindPath ? `Hive-mind: ${hiveMindPath}\n` : "") +
+                            (taskDirPath ? `Task dir: ${taskDirPath}\n` : "") +
                             `\nAgents are running in the background. ` +
                             `Use \`swarm_status\` to check progress, \`swarm_instruct\` to send instructions.`,
                     },
@@ -486,7 +501,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                 details: {
                     agentCount: params.agents.length,
                     socketPath,
-                    hiveMindPath,
+                    taskDirPath,
                 },
             };
         },
@@ -497,8 +512,8 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                 theme.fg("toolTitle", theme.bold("swarm ")) +
                 theme.fg("accent", `${count} agent${count !== 1 ? "s" : ""}`);
 
-            if (args.hiveMind?.path) {
-                text += theme.fg("dim", ` hive:${args.hiveMind.path}`);
+            if (args.taskDir?.path) {
+                text += theme.fg("dim", ` task:${args.taskDir.path}`);
             }
 
             for (const a of (args.agents || []).slice(0, 4)) {
