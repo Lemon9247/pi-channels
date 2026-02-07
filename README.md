@@ -6,7 +6,7 @@ Unix socket-based swarm coordination for the [pi coding agent](https://github.co
 
 Adds multi-agent swarm support to pi. A queen instance stays interactive while background agents work in parallel, coordinating through a shared hive-mind file and communicating via Unix socket notifications.
 
-**Tools registered:**
+**Tools:**
 
 | Tool | Available To | Purpose |
 |------|-------------|---------|
@@ -16,6 +16,7 @@ Adds multi-agent swarm support to pi. A queen instance stays interactive while b
 | `hive_notify` | Agents, Coordinators | Nudge teammates to check hive-mind |
 | `hive_blocker` | Agents, Coordinators | Signal being stuck (interrupts queen) |
 | `hive_done` | Agents, Coordinators | Signal task completion |
+| `hive_progress` | Agents, Coordinators | Send progress/status updates |
 
 **Commands:** `/hive [name]`, `/swarm-kill`, `/swarm-stop`
 
@@ -24,14 +25,7 @@ Adds multi-agent swarm support to pi. A queen instance stays interactive while b
 ## Install
 
 ```bash
-# From local path (development)
-pi install /path/to/pi-swarm
-
-# From git
-pi install git:github.com/user/pi-swarm
-
-# From npm (when published)
-pi install npm:pi-swarm
+pi install git:github.com/Lemon9247/pi-swarm
 ```
 
 ## Topologies
@@ -71,7 +65,7 @@ Per-swarm socket isolation is structural — agents in different swarms are on d
 
 - **Socket = doorbell, hive-mind = state.** The socket carries "I updated the hive-mind" nudges. Complex findings go in the hive-mind file.
 - **`edit` not `write` on hive-mind.** Multiple agents share the file. Never overwrite.
-- **Agents cannot spawn sub-agents.** Only queens and coordinators get the `swarm` tool. Prevents recursive delegation cascades.
+- **Agents cannot spawn sub-agents.** Only queens and coordinators get the `swarm` tool.
 - **Don't `bash sleep` to wait.** The queen stays available for user interaction. Notifications arrive asynchronously.
 
 ## Monitoring
@@ -79,9 +73,43 @@ Per-swarm socket isolation is structural — agents in different swarms are on d
 - **Widget**: Live agent tree below the editor with status icons and activity preview
 - **Status bar**: Compact `🐝 2/3 ⏳1` summary
 - **`/hive`**: Print detailed status to chat. `/hive <name>` for a specific agent's activity feed
-- **`/swarm-kill`**: Immediately kill the active swarm (process group kill)
-- **`/swarm-stop`**: Graceful shutdown — asks agents to wrap up (30s timeout), then kills stragglers
+- **`/swarm-kill`**: Immediately kill the active swarm
+- **`/swarm-stop`**: Graceful shutdown (30s timeout, then kill)
 
+## Architecture
+
+~4300 source lines, ~3600 test lines, 172 tests across 42 TypeScript files. Organized into four layers:
+
+- **`transport/`** — JSON-lines protocol, Transport/TransportServer interfaces, Unix socket and in-memory implementations
+- **`core/`** — Server, client, subject-based router, identity, state management, taskDir scaffolding, process spawning
+- **`tools/`** — Pi tool implementations (swarm, instruct, status, agent tools)
+- **`ui/`** — Dashboard widget, notifications, activity tracking, commands
+
+Key design: subject-based message routing with pluggable policies, transport abstraction for future TCP support, hierarchical agent codes for tree rendering, generation counter to guard against stale swarm signals.
+
+## Roadmap
+
+### P3: Query/Response Protocol — next
+
+`hive_query` and `hive_respond` tools for agents to ask teammates questions and receive answers via structured socket messages. Async, fire-and-forget.
+
+### P4: Inter-Queen Communication
+
+TCP + mutual TLS for queen-to-queen coordination, local and remote. Auto-discovery on the same machine, explicit config for remote peers. Query routing across queen boundaries, email-style addressing (`agent@queen`). VPN required — never expose to the public internet.
+
+### P5: Prompt Architecture
+
+Extract system prompts from code into markdown files. Tool documentation, coordination patterns, role definitions. Parallel with P4.
+
+## Development
+
+Zero npm dependencies — only peer deps on pi's core packages and Node builtins.
+
+```bash
+cd extensions/swarm-socket
+npx tsx tests/run.ts                                    # all tests
+npx tsx tests/core/routing.test.ts                      # single file
+```
 
 ## License
 
