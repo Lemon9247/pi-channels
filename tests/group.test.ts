@@ -35,8 +35,8 @@ describe("ChannelGroup", () => {
             path: groupPath,
             channels: [
                 { name: "general" },
-                { name: "inbox-a1", inbox: true },
-                { name: "inbox-a2", inbox: true },
+                { name: "inbox-a1" },
+                { name: "inbox-a2" },
             ],
         }));
 
@@ -56,7 +56,7 @@ describe("ChannelGroup", () => {
             path: groupPath,
             channels: [
                 { name: "general" },
-                { name: "inbox-a1", inbox: true },
+                { name: "inbox-a1" },
             ],
         }));
 
@@ -70,7 +70,7 @@ describe("ChannelGroup", () => {
         assert.equal(meta.pid, process.pid);
         assert.equal(meta.channels.length, 2);
         assert.deepEqual(meta.channels[0], { name: "general" });
-        assert.deepEqual(meta.channels[1], { name: "inbox-a1", inbox: true });
+        assert.deepEqual(meta.channels[1], { name: "inbox-a1" });
 
         await group.stop({ removeDir: true });
     });
@@ -290,7 +290,7 @@ describe("ChannelGroup", () => {
         const groupPath = tmpGroupPath();
         const group = track(new ChannelGroup({
             path: groupPath,
-            channels: [{ name: "general" }, { name: "inbox-a1", inbox: true }],
+            channels: [{ name: "general" }, { name: "inbox-a1" }],
         }));
 
         await group.start();

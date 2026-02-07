@@ -20,8 +20,8 @@ const group = new ChannelGroup({
     path: "/tmp/channels/my-group",
     channels: [
         { name: "general" },
-        { name: "inbox-a1", inbox: true },
-        { name: "inbox-a2", inbox: true },
+        { name: "inbox-a1" },
+        { name: "inbox-a2" },
     ],
 });
 await group.start();
@@ -64,10 +64,6 @@ interface Message {
 ```
 
 `msg` must be a non-empty string. `data`, if present, must be a plain object. The library validates shape but does not interpret content — use `data` for any metadata you need (sender identity, message type, addressing, etc.).
-
-### Inboxes
-
-An **inbox** is a channel with a single intended reader. Mechanically identical to any other channel — the distinction is semantic, stored in `group.json` as a hint. The library does not enforce single-reader access.
 
 ### Channel Groups
 
@@ -143,7 +139,7 @@ const group = new ChannelGroup({
     channels: [
         { name: "general" },
         { name: "topic-research" },
-        { name: "inbox-a1", inbox: true },
+        { name: "inbox-a1" },
     ],
 });
 
@@ -169,7 +165,7 @@ await group.stop({ removeDir: true }); // also remove the directory
     "channels": [
         { "name": "general" },
         { "name": "topic-research" },
-        { "name": "inbox-a1", "inbox": true }
+        { "name": "inbox-a1" }
     ]
 }
 ```

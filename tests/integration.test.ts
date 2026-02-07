@@ -38,10 +38,10 @@ describe("Integration", () => {
             path: groupPath,
             channels: [
                 { name: "general" },
-                { name: "inbox-queen", inbox: true },
-                { name: "inbox-a1", inbox: true },
-                { name: "inbox-a2", inbox: true },
-                { name: "inbox-a3", inbox: true },
+                { name: "inbox-queen" },
+                { name: "inbox-a1" },
+                { name: "inbox-a2" },
+                { name: "inbox-a3" },
             ],
         }));
         await group.start();
@@ -169,12 +169,12 @@ describe("Integration", () => {
 
         const group1 = track(new ChannelGroup({
             path: group1Path,
-            channels: [{ name: "general" }, { name: "inbox-a1", inbox: true }],
+            channels: [{ name: "general" }, { name: "inbox-a1" }],
         }));
 
         const group2 = track(new ChannelGroup({
             path: group2Path,
-            channels: [{ name: "general" }, { name: "inbox-b1", inbox: true }],
+            channels: [{ name: "general" }, { name: "inbox-b1" }],
         }));
 
         await group1.start();
@@ -304,7 +304,7 @@ describe("Integration", () => {
         const groupPath = tmpGroupPath();
         const group = track(new ChannelGroup({
             path: groupPath,
-            channels: [{ name: "inbox-queen", inbox: true }],
+            channels: [{ name: "inbox-queen" }],
         }));
         await group.start();
 

@@ -5,8 +5,6 @@ import { Channel, type ChannelOptions } from "./channel.js";
 export interface GroupChannelDef {
     /** Channel name (becomes <name>.sock in the group directory). */
     name: string;
-    /** Semantic hint — no behavioral difference. Stored in group.json. */
-    inbox?: boolean;
     /** Channel options override (e.g. echoToSender). */
     options?: Omit<ChannelOptions, "path">;
 }
@@ -21,7 +19,7 @@ export interface ChannelGroupOptions {
 interface GroupMetadata {
     created: string;
     pid: number;
-    channels: Array<{ name: string; inbox?: boolean }>;
+    channels: Array<{ name: string }>;
 }
 
 /**
@@ -183,10 +181,7 @@ export class ChannelGroup {
         const metadata: GroupMetadata = {
             created: new Date().toISOString(),
             pid: process.pid,
-            channels: this.channelDefs.map((d) => ({
-                name: d.name,
-                ...(d.inbox ? { inbox: true } : {}),
-            })),
+            channels: this.channelDefs.map((d) => ({ name: d.name })),
         };
 
         const metaPath = path.join(this.groupPath, "group.json");
