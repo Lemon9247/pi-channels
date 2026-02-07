@@ -68,6 +68,17 @@ function generateSocketPath(): string {
     return path.join(os.tmpdir(), `pi-swarm-${id}.sock`);
 }
 
+/** Minimal structural type for the tool execution context from pi. */
+interface ToolContext {
+    cwd: string;
+    hasUI: boolean;
+    ui: {
+        setWidget(id: string, widget: unknown): void;
+        setStatus(id: string, status: unknown): void;
+        notify(msg: string, level: string): void;
+    };
+}
+
 /**
  * Handle a sub-agent relay event that bubbled up from a coordinator.
  * Adds/updates the sub-agent in the queen's state so the dashboard can show it.
@@ -75,7 +86,7 @@ function generateSocketPath(): string {
  *
  * Accepts the new RelayEvent format. Legacy SubAgentRelay is converted before calling this.
  */
-function handleRelayEvent(state: SwarmState, relay: RelayEvent, ctx: any): void {
+function handleRelayEvent(state: SwarmState, relay: RelayEvent, ctx: ToolContext): void {
     const existing = state.agents.get(relay.name);
 
     if (relay.event === "register") {

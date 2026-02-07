@@ -21,6 +21,10 @@ let _identity: Identity | null = null;
 /**
  * Create the identity for this instance from environment variables.
  * Called once at startup. Subsequent calls return the cached identity.
+ *
+ * NOTE: The result is cached in a module-level singleton. If running multiple
+ * tests in the same process that manipulate `process.env`, call `resetIdentity()`
+ * between tests to clear the cache.
  */
 export function createIdentity(): Identity {
     if (_identity) return _identity;
@@ -52,6 +56,8 @@ export function getSocketPath(): string | undefined {
 
 /**
  * Reset identity (for testing only).
+ * MUST be called between tests if running in the same process,
+ * since `createIdentity()` caches the result in a module singleton.
  */
 export function resetIdentity(): void {
     _identity = null;

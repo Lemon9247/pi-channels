@@ -22,6 +22,11 @@ export interface AgentConfig {
 /**
  * Parse simple YAML frontmatter from markdown.
  * Returns { frontmatter, body } where frontmatter is key-value pairs.
+ *
+ * LIMITATION: This is a minimal parser that only handles simple `key: value` pairs.
+ * It does NOT handle: quoted values (quotes become part of the value), multi-line
+ * values, YAML lists (e.g. `- item`), nested objects, or other YAML features.
+ * Tools are expected as a comma-separated list on a single line (e.g. `tools: read, bash, edit`).
  */
 function parseFrontmatter(content: string): { frontmatter: Record<string, string>; body: string } {
     if (!content.startsWith("---")) {
