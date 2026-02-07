@@ -27,8 +27,6 @@ export interface AgentInfo {
     progressDetail?: string;   // Status line from ProgressMessage
 }
 
-import type { RelayEvent } from "../transport/protocol.js";
-
 /** @deprecated Use RelayEvent from protocol.ts instead. Kept for backward compat parsing. */
 export interface SubAgentRelay {
     sub: true;
@@ -55,20 +53,6 @@ export function parseSubRelay(reason: string): SubAgentRelay | null {
     return null;
 }
 
-/** Convert old SubAgentRelay to new RelayEvent format */
-export function subRelayToRelayEvent(relay: SubAgentRelay): RelayEvent {
-    return {
-        event: relay.type,
-        name: relay.name,
-        role: relay.role,
-        swarm: relay.swarm,
-        code: relay.code,
-        summary: relay.summary,
-        description: relay.description,
-        reason: relay.reason,
-    };
-}
-
 export interface SwarmState {
     generation: number;  // Monotonic ID — callbacks check this to detect stale swarms
     server: SwarmServer | null; // null if we're reusing existing socket (coordinator)
@@ -79,7 +63,7 @@ export interface SwarmState {
     // Callbacks for the extension to hook into
     onAgentDone?: (agentName: string, summary: string) => void;
     onAllDone?: () => void;
-    onBlocker?: (agentName: string, description: string, from: string) => void;
+    onBlocker?: (agentName: string, description: string) => void;
     onNudge?: (reason: string, from: string) => void;
 }
 

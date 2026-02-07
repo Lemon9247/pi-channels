@@ -20,7 +20,6 @@ import { UnixTransportServer } from "../transport/unix-socket.js";
 import {
     type AgentInfo,
     type SwarmState,
-    type SubAgentRelay,
     getSwarmState,
     getSwarmGeneration,
     setSwarmState,
@@ -214,7 +213,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                         } else if (msg.type === "blocker") {
                             const blockerMsg = msg as { type: "blocker"; description: string };
                             updateAgentStatus(_from.name, "blocked", { blockerDescription: blockerMsg.description });
-                            state.onBlocker?.(_from.name, blockerMsg.description, _from.name);
+                            state.onBlocker?.(_from.name, blockerMsg.description);
                         } else if (msg.type === "relay") {
                             // First-class relay message
                             const relayMsg = msg as RelayMessage;
@@ -223,7 +222,11 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                             const nudgeMsg = msg as { type: "nudge"; reason: string };
                             const reason = nudgeMsg.reason;
 
-                            // Backward compat: try parsing as legacy JSON-in-nudge relay
+                            // BACKWARD COMPAT ONLY: Before P2C added first-class RelayMessage,
+                            // coordinators relayed sub-agent events by JSON-encoding them into
+                            // nudge reasons (SubAgentRelay format). New code uses client.relay()
+                            // which produces a RelayMessage handled above. This fallback remains
+                            // to support any older agents that haven't been updated yet.
                             const legacyRelay = parseSubRelay(reason);
                             if (legacyRelay) {
                                 handleRelayEvent(state, {
@@ -374,7 +377,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                 updateDashboard(ctx);
             };
 
-            state.onBlocker = (agentName, description, _from) => {
+            state.onBlocker = (agentName, description) => {
                 if (getSwarmGeneration() !== gen) return;
                 pi.sendMessage(
                     {
