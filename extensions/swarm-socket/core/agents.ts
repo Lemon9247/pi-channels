@@ -104,8 +104,12 @@ export function discoverAgents(cwd: string): Map<string, AgentConfig> {
     }
 
     // Also check project-level .pi/agents/
+    // Walk up from cwd looking for .pi/agents/, capped at 10 levels to avoid
+    // traversing the entire filesystem when no project-level agents exist.
+    const MAX_WALK_DEPTH = 10;
     let projectDir = cwd;
-    while (true) {
+    let depth = 0;
+    while (depth < MAX_WALK_DEPTH) {
         const candidate = path.join(projectDir, ".pi", "agents");
         if (fs.existsSync(candidate)) {
             try {
@@ -139,8 +143,9 @@ export function discoverAgents(cwd: string): Map<string, AgentConfig> {
             break;
         }
         const parent = path.dirname(projectDir);
-        if (parent === projectDir) break;
+        if (parent === projectDir) break; // filesystem root
         projectDir = parent;
+        depth++;
     }
 
     return agents;

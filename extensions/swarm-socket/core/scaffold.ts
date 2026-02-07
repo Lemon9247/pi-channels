@@ -311,6 +311,7 @@ export function scaffoldCoordinatorSubDir(
         taskDirPath: subDir,
         isHierarchical: false,
         hiveMindPath: hmPath,
+        crossSwarmPath: csPath,
         agentFiles,
     };
 }

@@ -53,6 +53,7 @@ export class SwarmServer {
     private transportServer: TransportServer;
     private clients: Map<string, ClientConnection> = new Map();
     private unregistered: Set<Transport> = new Set();
+    private transportToClient: WeakMap<Transport, ClientConnection> = new WeakMap();
     private handlers: ServerEventHandler;
     private router: Router;
     private policy: SubscriptionPolicy;
@@ -114,14 +115,8 @@ export class SwarmServer {
         const preClient: { buffer: string } = { buffer: "" };
 
         transport.onData((data) => {
-            // Find the registered client for this transport
-            let client: ClientConnection | undefined;
-            for (const c of this.clients.values()) {
-                if (c.transport === transport) {
-                    client = c;
-                    break;
-                }
-            }
+            // O(1) lookup via WeakMap (set in handleRegister, deleted on close)
+            let client: ClientConnection | undefined = this.transportToClient.get(transport);
 
             const state = client || preClient;
             state.buffer += data;
@@ -158,12 +153,11 @@ export class SwarmServer {
         transport.onClose(() => {
             this.unregistered.delete(transport);
             // Find and remove the registered client
-            for (const [name, client] of this.clients.entries()) {
-                if (client.transport === transport) {
-                    this.clients.delete(name);
-                    this.handlers.onDisconnect?.(client);
-                    break;
-                }
+            const closedClient = this.transportToClient.get(transport);
+            if (closedClient) {
+                this.clients.delete(closedClient.name);
+                this.transportToClient.delete(transport);
+                this.handlers.onDisconnect?.(closedClient);
             }
         });
 
@@ -197,6 +191,7 @@ export class SwarmServer {
         };
 
         this.clients.set(msg.name, client);
+        this.transportToClient.set(transport, client);
         this.unregistered.delete(transport);
         this.sendTo(transport, serialize({ type: "registered" }));
         this.handlers.onRegister?.(client);
