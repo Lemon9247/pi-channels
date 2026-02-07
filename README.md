@@ -2,9 +2,17 @@
 
 Channel-based messaging over Unix domain sockets. Simple, protocol-agnostic, zero runtime dependencies.
 
+## What is this for
+
+Agent-Channels is a simple protocol to be used by agents, to let them talk to other agents on your machine. It's modelled after IRC/matrix/discord etc. and is really nothing fancy - just a bunch of JSON through IPC. Clients can subscribe to receive messages on different sockets, and send them as well. Will also be shipping a simple TCP bridge later so you can communicate over networks.
+
+Honestly it's dumb as rocks, but it's simple and easy :)
+
+
 ## Install
 
 ```bash
+git clone git@github.com:Lemon9247/agent-channels.git
 npm install agent-channels
 ```
 
@@ -197,10 +205,9 @@ isValidMessage({ msg: "hi", data: [1] });            // false (data must be obje
 
 ## Design Principles
 
-- **Zero runtime dependencies.** Node.js builtins only (`net`, `fs`, `path`, `events`).
-- **Protocol-agnostic.** No opinions about what messages mean. No routing logic.
+- **Protocol-agnostic.** No opinions about what messages mean. No routing logic. Batteries not included.
 - **Filesystem is the router.** Channels are sockets in a directory. Addressing is "which socket do you connect to."
-- **One message format.** `{msg, data}`. No typed messages, no schema enforcement on `data`.
+- **One message format.** `{msg, data}`. No typed messages, no schema enforcement on `data`. Do whatever you want.
 - **Bridges for external systems.** TCP, Discord, Matrix — each is a bridge that translates between local channels and an external protocol. The library ships a TCP bridge; others are separate packages.
 
 ## What It Doesn't Do
@@ -210,6 +217,7 @@ isValidMessage({ msg: "hi", data: [1] });            // false (data must be obje
 - **Routing.** Fan-out only. Which channel you write to is the routing.
 - **Auto-reconnect.** Consumers handle reconnection.
 - **Backpressure.** OS socket buffers handle it.
+- **Make you coffee.** Get a coffee machine
 
 ## License
 
