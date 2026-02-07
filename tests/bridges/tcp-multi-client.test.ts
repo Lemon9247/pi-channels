@@ -92,12 +92,10 @@ describe("TcpBridgeServer multi-client fan-out", () => {
 
         await wait(150);
 
-        // Client 2 should receive it (routed through channel fan-out back to bridge, then to client 2)
-        // Note: the bridge client sends to the channel, channel fans out to bridge's own
-        // channel client, bridge forwards to all TCP clients. Client 1 will also receive
-        // (since the bridge is a separate channel client, the channel sees the bridge as sender
-        // and fans out to all *other* channel clients — but the bridge's channel client receives
-        // and forwards to ALL TCP clients including the original sender).
+        // Client 2 receives via the bridge's direct fan-out to other TCP clients.
+        // The channel doesn't echo back to the bridge (bridge is the sender), so
+        // there's no duplication. Client 1 does NOT receive its own message.
+        assert.equal(client1.messages.length, 0, "Sender should not receive own message");
         assert.equal(client2.messages.length, 1);
         assert.equal(client2.messages[0].msg, "from client 1");
 

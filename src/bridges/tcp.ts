@@ -80,29 +80,34 @@ export class TcpBridgeServer extends EventEmitter implements Bridge {
             this.emit("error", new Error("Local channel disconnected"));
         });
 
-        // Start TCP server
-        await new Promise<void>((resolve, reject) => {
-            const server = net.createServer((socket) => {
-                this.handleTcpConnection(socket);
-            });
+        // Start TCP server — clean up channel client on failure (C1 fix)
+        try {
+            await new Promise<void>((resolve, reject) => {
+                const server = net.createServer((socket) => {
+                    this.handleTcpConnection(socket);
+                });
 
-            const onError = (err: Error) => reject(err);
-            server.once("error", onError);
+                const onError = (err: Error) => reject(err);
+                server.once("error", onError);
 
-            server.listen(this.port, this.host, () => {
-                server.removeListener("error", onError);
-                server.on("error", (err) => this.emit("error", err));
-                this.tcpServer = server;
-                resolve();
+                server.listen(this.port, this.host, () => {
+                    server.removeListener("error", onError);
+                    server.on("error", (err) => this.emit("error", err));
+                    this.tcpServer = server;
+                    resolve();
+                });
             });
-        });
+        } catch (err) {
+            this.channelClient.disconnect();
+            this.channelClient = null;
+            throw err;
+        }
 
         this._status = "running";
     }
 
     async stop(): Promise<void> {
-        if (this._status === "stopped") return;
-
+        // Always clean up whatever state exists (H1 fix)
         this._status = "stopped";
 
         // Disconnect all TCP clients
@@ -224,7 +229,7 @@ export interface TcpBridgeClientOptions {
  *
  * - Messages from the local channel are forwarded to the remote server.
  * - Messages from the remote server are forwarded to the local channel.
- * - Reconnects automatically on TCP disconnect (with exponential backoff).
+ * - Reconnects automatically on TCP disconnect (with exponential backoff + jitter).
  *
  * Events:
  * - "error" (err: Error) — bridge-level error
@@ -286,15 +291,20 @@ export class TcpBridgeClient extends EventEmitter implements Bridge {
             }
         });
 
-        // Connect to remote TCP bridge
-        await this.connectTcp();
+        // Connect to remote TCP bridge — clean up channel client on failure (C1 fix)
+        try {
+            await this.connectTcp();
+        } catch (err) {
+            this.channelClient.disconnect();
+            this.channelClient = null;
+            throw err;
+        }
 
         this._status = "running";
     }
 
     async stop(): Promise<void> {
-        if (this._status === "stopped") return;
-
+        // Always clean up whatever state exists (H1 fix)
         this.stopping = true;
         this._status = "stopped";
 
@@ -323,9 +333,11 @@ export class TcpBridgeClient extends EventEmitter implements Bridge {
 
     private connectTcp(): Promise<void> {
         return new Promise<void>((resolve, reject) => {
+            let settled = false; // H2 fix: track whether promise is resolved/rejected
             const socket = net.connect(this.port, this.host);
 
             socket.on("connect", () => {
+                settled = true;
                 this.tcpSocket = socket;
                 this.tcpDecoder.reset();
                 this.reconnectAttempt = 0;
@@ -353,18 +365,20 @@ export class TcpBridgeClient extends EventEmitter implements Bridge {
             });
 
             socket.on("close", () => {
+                const wasConnected = this.tcpSocket !== null; // C2 fix
                 this.tcpSocket = null;
                 this.tcpDecoder.reset();
 
-                if (!this.stopping) {
+                // Only reconnect if we were previously connected (not on initial failure)
+                if (wasConnected && !this.stopping) {
                     this.emit("tcp-disconnect");
                     this.scheduleReconnect();
                 }
             });
 
             socket.on("error", (err) => {
-                if (!this.tcpSocket) {
-                    // Connection failed during initial connect
+                if (!settled) {
+                    settled = true;
                     reject(err);
                 } else if ((err as NodeJS.ErrnoException).code !== "ECONNRESET") {
                     this.emit("error", err);
@@ -377,10 +391,10 @@ export class TcpBridgeClient extends EventEmitter implements Bridge {
         if (!this.shouldReconnect || this.stopping) return;
 
         this.reconnectAttempt++;
-        const delay = Math.min(
-            this.initialDelay * Math.pow(2, this.reconnectAttempt - 1),
-            this.maxDelay
-        );
+        // Exponential backoff with ±25% jitter (M1 fix)
+        const base = this.initialDelay * Math.pow(2, this.reconnectAttempt - 1);
+        const jitter = base * (0.75 + Math.random() * 0.5);
+        const delay = Math.min(Math.round(jitter), this.maxDelay);
 
         this.emit("reconnecting", this.reconnectAttempt, delay);
 
@@ -391,7 +405,7 @@ export class TcpBridgeClient extends EventEmitter implements Bridge {
             try {
                 await this.connectTcp();
             } catch {
-                // connectTcp failed — the close handler will fire and schedule another retry
+                // connectTcp failed — schedule another retry
                 this.scheduleReconnect();
             }
         }, delay);

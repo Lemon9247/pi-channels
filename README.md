@@ -307,7 +307,7 @@ The TCP bridge has **no encryption and no authentication**. This is intentional 
 - **Authentication.** Anyone on the machine can connect to any socket.
 - **Encryption.** Messages are plaintext.
 - **Routing.** Fan-out only. Which channel you write to is the routing.
-- **Auto-reconnect.** Consumers handle reconnection.
+- **Auto-reconnect on ChannelClient.** Consumers handle reconnection. (The TCP bridge client has built-in reconnection.)
 - **Backpressure.** OS socket buffers handle it.
 - **Make you coffee.** Get a coffee machine
 

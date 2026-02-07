@@ -137,17 +137,14 @@ describe("TcpBridgeClient reconnection", () => {
         await server.stop();
         await wait(1500);
 
-        // Should have multiple attempts with increasing delays
+        // Should have multiple attempts with generally increasing delays (jittered)
         assert.ok(delays.length >= 3, `Expected >= 3 attempts, got ${delays.length}`);
-        // First delay should be 50, then 100, then 200, then capped at 400
-        assert.equal(delays[0], 50);
-        assert.equal(delays[1], 100);
-        assert.equal(delays[2], 200);
-        if (delays.length >= 4) {
-            assert.equal(delays[3], 400);
-        }
-        if (delays.length >= 5) {
-            assert.equal(delays[4], 400); // capped
+        // With jitter (±25%), base delays are 50, 100, 200, 400 (capped)
+        // First delay should be roughly 50 (37-63 with jitter)
+        assert.ok(delays[0] >= 30 && delays[0] <= 70, `First delay ${delays[0]} out of range`);
+        // All delays should be capped at maxReconnectDelay (400)
+        for (const d of delays) {
+            assert.ok(d <= 400, `Delay ${d} exceeds max`);
         }
     });
 
