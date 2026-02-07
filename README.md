@@ -203,6 +203,98 @@ isValidMessage({ msg: "" });                         // false (empty msg)
 isValidMessage({ msg: "hi", data: [1] });            // false (data must be object)
 ```
 
+## Bridges
+
+A **bridge** connects a local channel to an external system. Messages flow bidirectionally: local channel ↔ bridge ↔ external. The bridge handles any protocol translation.
+
+```
+[ChannelClient] ←→ [Bridge] ←→ [External system]
+```
+
+The library ships a TCP bridge as a reference implementation. Future bridges (Discord, Matrix, IRC) would be separate packages.
+
+### Bridge Interface
+
+```typescript
+interface Bridge {
+    start(): Promise<void>;
+    stop(): Promise<void>;
+    get status(): "running" | "stopped" | "error";
+}
+```
+
+### TCP Bridge
+
+Expose a local channel over TCP. Same wire format as Unix sockets (4-byte length prefix + JSON), just on a different transport.
+
+#### Server Mode
+
+Listen for remote TCP connections. Messages from the local channel fan out to all TCP clients. Messages from TCP clients are forwarded to the local channel and to other TCP clients.
+
+```typescript
+import { Channel, TcpBridgeServer } from "agent-channels";
+
+const channel = new Channel({ path: "/tmp/ch/general.sock" });
+await channel.start();
+
+const bridge = new TcpBridgeServer({
+    channelPath: channel.path,
+    host: "0.0.0.0",  // default: "127.0.0.1"
+    port: 9100,
+});
+await bridge.start();
+
+bridge.on("tcp-connect", (clientId) => console.log("remote connected:", clientId));
+bridge.on("tcp-disconnect", (clientId) => console.log("remote disconnected:", clientId));
+
+// Later...
+await bridge.stop();
+```
+
+#### Client Mode
+
+Connect a local channel to a remote TcpBridgeServer. Messages flow both ways. Auto-reconnects with exponential backoff on disconnect.
+
+```typescript
+import { Channel, TcpBridgeClient } from "agent-channels";
+
+const channel = new Channel({ path: "/tmp/ch/general.sock" });
+await channel.start();
+
+const bridge = new TcpBridgeClient({
+    channelPath: channel.path,
+    host: "192.168.1.10",
+    port: 9100,
+    reconnect: true,         // default: true
+    reconnectDelay: 500,     // initial delay ms, default: 500
+    maxReconnectDelay: 30000, // max delay ms, default: 30000
+});
+await bridge.start();
+
+bridge.on("tcp-connect", () => console.log("connected to remote"));
+bridge.on("tcp-disconnect", () => console.log("disconnected from remote"));
+bridge.on("reconnecting", (attempt, delay) => console.log(`reconnect #${attempt} in ${delay}ms`));
+```
+
+#### Two Machines Bridged
+
+```
+Machine A:                          Machine B:
+  general.sock                        general.sock
+       ↕                                  ↕
+  TcpBridgeServer ←——— TCP ———→ TcpBridgeClient
+```
+
+Messages on Machine A's channel appear on Machine B's channel and vice versa. This is inter-agent communication over a network — no special protocol, just a TCP pipe between two channels.
+
+#### ⚠️ Security Warning
+
+The TCP bridge has **no encryption and no authentication**. This is intentional — keep it simple.
+
+- **Trusted networks** (localhost, VPN, Tailscale): plaintext TCP is fine.
+- **Untrusted networks**: wrap in an SSH tunnel, or build a TLS bridge variant.
+- **Do not expose TCP bridges to the public internet.** Agents have shell access. A TCP bridge is effectively an RCE channel.
+
 ## Design Principles
 
 - **Protocol-agnostic.** No opinions about what messages mean. No routing logic. Batteries not included.
@@ -215,7 +307,7 @@ isValidMessage({ msg: "hi", data: [1] });            // false (data must be obje
 - **Authentication.** Anyone on the machine can connect to any socket.
 - **Encryption.** Messages are plaintext.
 - **Routing.** Fan-out only. Which channel you write to is the routing.
-- **Auto-reconnect.** Consumers handle reconnection.
+- **Auto-reconnect on ChannelClient.** Consumers handle reconnection. (The TCP bridge client has built-in reconnection.)
 - **Backpressure.** OS socket buffers handle it.
 - **Make you coffee.** Get a coffee machine
 
