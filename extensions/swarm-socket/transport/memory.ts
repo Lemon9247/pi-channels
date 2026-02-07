@@ -4,6 +4,20 @@
  * A pair of transports connected back-to-back for testing.
  * Write to one end, read from the other. Synchronous, no real I/O.
  *
+ * **IMPORTANT: Synchronous delivery asymmetry.**
+ * Unlike real Unix sockets (where data arrives asynchronously on a future event-loop tick),
+ * InMemoryTransport delivers data *synchronously inside write()*. This means:
+ *
+ * 1. A write() call immediately invokes the peer's data handlers before returning.
+ * 2. Tests using InMemoryTransport may pass even when production code has ordering bugs
+ *    that depend on async delivery timing.
+ * 3. SwarmClient.connectWithTransport() specifically handles this by registering the
+ *    data handler BEFORE sending the registration message — with synchronous transports,
+ *    the server's "registered" response arrives during the write() call.
+ *
+ * Tests mitigate this with `await delay(10)` to give the event loop a tick for any
+ * async processing that wraps the synchronous transport.
+ *
  * Usage:
  *   const [client, server] = createMemoryTransportPair();
  *   // data written to client arrives on server, and vice versa

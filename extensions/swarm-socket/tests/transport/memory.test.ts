@@ -125,6 +125,26 @@ async function main() {
         }
     });
 
+    await test("connect throws after server stopped (T7)", async () => {
+        const server = new InMemoryTransportServer();
+        server.onConnection(() => {});
+        await server.start();
+
+        // Verify it works while running
+        const t = server.connect();
+        assert(t.connected, "connect works while running");
+
+        await server.stop();
+
+        // Should throw after stop
+        try {
+            server.connect();
+            assert(false, "should have thrown after stop");
+        } catch (err) {
+            assert((err as Error).message.includes("not running"), "correct error after stop");
+        }
+    });
+
     console.log("\nSwarmServer + InMemoryTransport:");
 
     await test("server/client work with in-memory transport", async () => {

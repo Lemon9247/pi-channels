@@ -1,5 +1,12 @@
 /**
- * Relay integration tests: coordinator relays sub-agent events to queen
+ * Relay integration tests: BACKWARD COMPATIBILITY — old JSON-in-nudge format.
+ *
+ * These tests verify the OLD relay format where coordinator encodes sub-agent events
+ * as JSON strings inside nudge reasons (the `{ sub: true, ... }` format parsed by
+ * `parseSubRelay`). This format is deprecated but kept for backward compatibility.
+ *
+ * For tests of the NEW first-class relay format (`client.relay()` / RelayMessage),
+ * see `tests/integration/relay-v2.test.ts` and `tests/integration/targeted-messaging.test.ts`.
  */
 
 import { test, assert, assertEqual, tmpSocketPath, delay, summarize } from "../helpers.js";
@@ -9,7 +16,7 @@ import { UnixTransportServer } from "../../transport/unix-socket.js";
 import { parseSubRelay } from "../../core/state.js";
 
 async function main() {
-    console.log("\nRelay Integration:");
+    console.log("\nRelay Integration (backward compat — old JSON-in-nudge format):");
 
     await test("coordinator relays sub-agent registration to queen via JSON nudge", async () => {
         const sock = tmpSocketPath();
