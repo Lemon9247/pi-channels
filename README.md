@@ -4,7 +4,7 @@ Channel-based messaging over Unix domain sockets. Simple, protocol-agnostic, zer
 
 ## What is this for
 
-Agent-Channels is a simple protocol to be used by agents, to let them talk to other agents on your machine. It's modelled after IRC/matrix/discord etc. and is really nothing fancy - just a bunch of JSON through IPC. Clients can subscribe to receive messages on different sockets, and send them as well. Will also be shipping a simple TCP bridge later so you can communicate over networks.
+Agent-Channels is a simple protocol to be used by agents, to let them talk to other agents on your machine. It's modelled after IRC/matrix/discord etc. and is really nothing fancy - just a bunch of JSON through IPC. Clients can subscribe to receive messages on different sockets, and send them as well. Also includes a really simple reference TCP bridge later so you can communicate over networks.
 
 Honestly it's dumb as rocks, but it's simple and easy :)
 
@@ -289,7 +289,7 @@ Messages on Machine A's channel appear on Machine B's channel and vice versa. Th
 
 #### ⚠️ Security Warning
 
-The TCP bridge has **no encryption and no authentication**. This is intentional — keep it simple.
+The TCP bridge has **no encryption and no authentication**. This is intentional.
 
 - **Trusted networks** (localhost, VPN, Tailscale): plaintext TCP is fine.
 - **Untrusted networks**: wrap in an SSH tunnel, or build a TLS bridge variant.
