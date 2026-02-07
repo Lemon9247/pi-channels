@@ -82,23 +82,6 @@ Per-swarm socket isolation is structural — agents in different swarms are on d
 - **`/swarm-kill`**: Immediately kill the active swarm (process group kill)
 - **`/swarm-stop`**: Graceful shutdown — asks agents to wrap up (30s timeout), then kills stragglers
 
-## Architecture
-
-~3900 lines of TypeScript across 16 files:
-
-- `protocol.ts` — JSON-lines message protocol (register, nudge, blocker, done, instruct)
-- `server.ts` / `client.ts` — Unix socket server and client
-- `state.ts` — Swarm state management, hierarchical codes, relay protocol
-- `swarm-tool.ts` — The main `swarm` tool (agent spawning, socket setup, notification handling)
-- `instruct-tool.ts` / `status-tool.ts` — Queen's instruction and status tools
-- `agent-tools.ts` — Agent-side tools (hive_notify, hive_blocker, hive_done)
-- `notifications.ts` — Message injection into pi's context
-- `dashboard.ts` — Widget and message rendering
-- `activity.ts` — Agent activity tracking
-- `agents.ts` — Pre-defined agent discovery
-- `swarm-command.ts` — `/hive`, `/swarm-kill`, `/swarm-stop` commands
-- `index.ts` — Extension entry point
-- `test.ts` — 48 tests
 
 ## License
 
