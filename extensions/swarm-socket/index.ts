@@ -11,11 +11,8 @@
  * spawn sub-agents within existing swarms).
  */
 
-import * as fs from "node:fs";
-import * as net from "node:net";
-import * as os from "node:os";
-import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { cleanStaleSockets } from "./transport/unix-socket.js";
 import { SwarmClient } from "./core/client.js";
 import { createIdentity, getSocketPath } from "./core/identity.js";
 import { registerSwarmTool } from "./tools/swarm.js";
@@ -27,35 +24,6 @@ import { cleanupSwarm, setParentClient, getParentClient } from "./core/state.js"
 import { registerMessageRenderers } from "./ui/renderers.js";
 import { clearDashboard } from "./ui/dashboard.js";
 import { registerSwarmCommand } from "./ui/commands.js";
-
-/** Clean up stale socket files from crashed sessions */
-function cleanStaleSockets(): void {
-    const tmpDir = os.tmpdir();
-    try {
-        const entries = fs.readdirSync(tmpDir);
-        for (const entry of entries) {
-            if (!entry.startsWith("pi-swarm-") || !entry.endsWith(".sock")) continue;
-            const sockPath = path.join(tmpDir, entry);
-            try {
-                // Try connecting — if it fails, the socket is stale
-                const sock = net.createConnection(sockPath);
-                // If connect succeeds, it's live — disconnect
-                sock.on("connect", () => sock.destroy());
-                // If it errors, it's stale — remove it
-                sock.on("error", () => {
-                    try { fs.unlinkSync(sockPath); } catch { /* ignore */ }
-                });
-                // Timeout after 500ms
-                sock.setTimeout(500, () => {
-                    sock.destroy();
-                    try { fs.unlinkSync(sockPath); } catch { /* ignore */ }
-                });
-            } catch {
-                try { fs.unlinkSync(sockPath); } catch { /* ignore */ }
-            }
-        }
-    } catch { /* ignore tmpdir read errors */ }
-}
 
 export default function (pi: ExtensionAPI) {
     // Initialize identity from environment variables

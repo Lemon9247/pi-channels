@@ -8,6 +8,8 @@
 
 import * as net from "node:net";
 import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { Transport, TransportServer } from "./types.js";
 
 /** Wraps a net.Socket as a Transport. */
@@ -94,6 +96,39 @@ export class UnixTransportServer implements TransportServer {
             });
         });
     }
+}
+
+/**
+ * Clean up stale socket files from crashed sessions.
+ * Probes each pi-swarm-*.sock file in tmpdir — if connection fails,
+ * the socket is stale and gets removed.
+ */
+export function cleanStaleSockets(): void {
+    const tmpDir = os.tmpdir();
+    try {
+        const entries = fs.readdirSync(tmpDir);
+        for (const entry of entries) {
+            if (!entry.startsWith("pi-swarm-") || !entry.endsWith(".sock")) continue;
+            const sockPath = path.join(tmpDir, entry);
+            try {
+                // Try connecting — if it fails, the socket is stale
+                const sock = net.createConnection(sockPath);
+                // If connect succeeds, it's live — disconnect
+                sock.on("connect", () => sock.destroy());
+                // If it errors, it's stale — remove it
+                sock.on("error", () => {
+                    try { fs.unlinkSync(sockPath); } catch { /* ignore */ }
+                });
+                // Timeout after 500ms
+                sock.setTimeout(500, () => {
+                    sock.destroy();
+                    try { fs.unlinkSync(sockPath); } catch { /* ignore */ }
+                });
+            } catch {
+                try { fs.unlinkSync(sockPath); } catch { /* ignore */ }
+            }
+        }
+    } catch { /* ignore tmpdir read errors */ }
 }
 
 /**
