@@ -13,14 +13,15 @@
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { SwarmClient } from "../core/client.js";
+import { normalizeRelayedMessage } from "../transport/protocol.js";
 import type { RelayedMessage, NudgeMessage } from "../transport/protocol.js";
 
 export function setupNotifications(pi: ExtensionAPI, client: SwarmClient): void {
-    client.on("message", (relayed: RelayedMessage) => {
+    client.on("message", (raw: RelayedMessage) => {
+        const relayed = normalizeRelayedMessage(raw);
         const { from, message } = relayed;
-        // from is now a MessageSender object with name, role, swarm
-        const senderName = typeof from === "string" ? from : from.name;
-        const senderRole = typeof from === "string" ? (relayed as any).fromRole : from.role;
+        const senderName = from.name;
+        const senderRole = from.role;
 
         switch (message.type) {
             case "blocker": {

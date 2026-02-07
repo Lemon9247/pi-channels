@@ -201,3 +201,26 @@ export function isRelayedMessage(msg: unknown): msg is RelayedMessage {
     // Backward compatibility: old format with from as string
     return typeof m.from === "string" && typeof m.fromRole === "string";
 }
+
+/**
+ * Normalize a RelayedMessage to the canonical {from: MessageSender} format.
+ * Handles backward compatibility: old format {from: string, fromRole, fromSwarm}
+ * is converted to {from: {name, role, swarm}, message}.
+ *
+ * Call this at the boundary (after isRelayedMessage) to ensure downstream code
+ * always sees from as a MessageSender object.
+ */
+export function normalizeRelayedMessage(msg: RelayedMessage): RelayedMessage {
+    const raw = msg as any;
+    if (typeof raw.from === "string") {
+        return {
+            from: {
+                name: raw.from,
+                role: raw.fromRole ?? "agent",
+                swarm: raw.fromSwarm,
+            },
+            message: raw.message,
+        };
+    }
+    return msg;
+}
