@@ -134,7 +134,7 @@ describe("ChannelGroup", () => {
         const received: Message[] = [];
         client2.on("message", (msg: Message) => received.push(msg));
 
-        client1.send({ to: "general", msg: "hello through group" });
+        client1.send({ msg: "hello through group" });
         await new Promise((r) => setTimeout(r, 50));
 
         assert.equal(received.length, 1);

@@ -91,7 +91,7 @@ describe("Channel", () => {
         client2.on("message", (msg: Message) => received2.push(msg));
         client3.on("message", (msg: Message) => received3.push(msg));
 
-        const msg: Message = { to: "general", msg: "hello from client1" };
+        const msg: Message = { msg: "hello from client1" };
         client1.send(msg);
 
         // Wait for delivery
@@ -120,7 +120,7 @@ describe("Channel", () => {
         const received: Message[] = [];
         client.on("message", (msg: Message) => received.push(msg));
 
-        client.send({ to: "self", msg: "echo test" });
+        client.send({ msg: "echo test" });
         await new Promise((r) => setTimeout(r, 50));
 
         assert.equal(received.length, 1);
@@ -145,7 +145,7 @@ describe("Channel", () => {
         client1.on("message", (msg: Message) => received1.push(msg));
         client2.on("message", (msg: Message) => received2.push(msg));
 
-        channel.broadcast({ to: "all", msg: "server broadcast" });
+        channel.broadcast({ msg: "server broadcast" });
         await new Promise((r) => setTimeout(r, 50));
 
         assert.equal(received1.length, 1);
@@ -171,7 +171,7 @@ describe("Channel", () => {
             });
         });
 
-        client.send({ to: "test", msg: "event test" });
+        client.send({ msg: "event test" });
         const { msg, clientId } = await messagePromise;
 
         assert.equal(msg.msg, "event test");

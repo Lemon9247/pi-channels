@@ -5,7 +5,7 @@ import type { Message } from "../src/message.js";
 
 describe("encode", () => {
     it("produces a 4-byte length prefix followed by JSON", () => {
-        const msg: Message = { to: "general", msg: "hello" };
+        const msg: Message = { msg: "hello" };
         const frame = encode(msg);
         const len = frame.readUInt32BE(0);
         const json = frame.subarray(4).toString("utf-8");
@@ -14,7 +14,7 @@ describe("encode", () => {
     });
 
     it("includes data field when present", () => {
-        const msg: Message = { to: "a1", msg: "test", data: { x: 42 } };
+        const msg: Message = { msg: "test", data: { x: 42 } };
         const frame = encode(msg);
         const json = frame.subarray(4).toString("utf-8");
         assert.deepEqual(JSON.parse(json), msg);
@@ -24,7 +24,7 @@ describe("encode", () => {
 describe("FrameDecoder", () => {
     it("decodes a single complete frame", () => {
         const decoder = new FrameDecoder();
-        const msg: Message = { to: "general", msg: "hello" };
+        const msg: Message = { msg: "hello" };
         const messages = decoder.push(encode(msg));
         assert.equal(messages.length, 1);
         assert.deepEqual(messages[0], msg);
@@ -32,9 +32,9 @@ describe("FrameDecoder", () => {
 
     it("decodes multiple frames in a single chunk", () => {
         const decoder = new FrameDecoder();
-        const msg1: Message = { to: "a", msg: "one" };
-        const msg2: Message = { to: "b", msg: "two" };
-        const msg3: Message = { to: "c", msg: "three" };
+        const msg1: Message = { msg: "one" };
+        const msg2: Message = { msg: "two" };
+        const msg3: Message = { msg: "three" };
         const combined = Buffer.concat([encode(msg1), encode(msg2), encode(msg3)]);
         const messages = decoder.push(combined);
         assert.equal(messages.length, 3);
@@ -45,13 +45,11 @@ describe("FrameDecoder", () => {
 
     it("handles partial reads — length header split", () => {
         const decoder = new FrameDecoder();
-        const frame = encode({ to: "x", msg: "partial" });
+        const frame = encode({ msg: "partial" });
 
-        // Send just 2 bytes of the 4-byte header
         let messages = decoder.push(frame.subarray(0, 2));
         assert.equal(messages.length, 0);
 
-        // Send the rest
         messages = decoder.push(frame.subarray(2));
         assert.equal(messages.length, 1);
         assert.equal(messages[0]!.msg, "partial");
@@ -59,13 +57,11 @@ describe("FrameDecoder", () => {
 
     it("handles partial reads — body split", () => {
         const decoder = new FrameDecoder();
-        const frame = encode({ to: "x", msg: "split body test" });
+        const frame = encode({ msg: "split body test" });
 
-        // Send header + partial body
         let messages = decoder.push(frame.subarray(0, 8));
         assert.equal(messages.length, 0);
 
-        // Send rest of body
         messages = decoder.push(frame.subarray(8));
         assert.equal(messages.length, 1);
         assert.equal(messages[0]!.msg, "split body test");
@@ -73,7 +69,7 @@ describe("FrameDecoder", () => {
 
     it("handles byte-at-a-time feeding", () => {
         const decoder = new FrameDecoder();
-        const msg: Message = { to: "slow", msg: "byte by byte" };
+        const msg: Message = { msg: "byte by byte" };
         const frame = encode(msg);
 
         let messages: Message[] = [];
@@ -88,8 +84,8 @@ describe("FrameDecoder", () => {
     });
 
     it("throws on oversized message", () => {
-        const decoder = new FrameDecoder(10); // 10 byte max
-        const msg: Message = { to: "big", msg: "this message is way too large for the limit" };
+        const decoder = new FrameDecoder(10);
+        const msg: Message = { msg: "this message is way too large for the limit" };
         const frame = encode(msg);
 
         assert.throws(() => decoder.push(frame), /exceeds maximum/);
@@ -97,17 +93,14 @@ describe("FrameDecoder", () => {
 
     it("resets buffer after oversized message error", () => {
         const decoder = new FrameDecoder(50);
-        // First message is fine
-        const smallMsg: Message = { to: "a", msg: "b" };
+        const smallMsg: Message = { msg: "b" };
         let messages = decoder.push(encode(smallMsg));
         assert.equal(messages.length, 1);
 
-        // Craft an oversized frame by writing a huge length prefix
         const oversizedFrame = Buffer.alloc(4);
         oversizedFrame.writeUInt32BE(999999, 0);
         assert.throws(() => decoder.push(oversizedFrame), /exceeds maximum/);
 
-        // After the error, decoder buffer is reset — new valid messages work
         messages = decoder.push(encode(smallMsg));
         assert.equal(messages.length, 1);
         assert.deepEqual(messages[0], smallMsg);
@@ -133,19 +126,9 @@ describe("FrameDecoder", () => {
         assert.throws(() => decoder.push(frame), /Invalid message format/);
     });
 
-    it("throws on Message with empty to field", () => {
-        const decoder = new FrameDecoder();
-        const json = Buffer.from(JSON.stringify({ to: "", msg: "hello" }), "utf-8");
-        const frame = Buffer.alloc(4 + json.length);
-        frame.writeUInt32BE(json.length, 0);
-        json.copy(frame, 4);
-
-        assert.throws(() => decoder.push(frame), /Invalid message format/);
-    });
-
     it("throws on Message with empty msg field", () => {
         const decoder = new FrameDecoder();
-        const json = Buffer.from(JSON.stringify({ to: "a", msg: "" }), "utf-8");
+        const json = Buffer.from(JSON.stringify({ msg: "" }), "utf-8");
         const frame = Buffer.alloc(4 + json.length);
         frame.writeUInt32BE(json.length, 0);
         json.copy(frame, 4);
@@ -155,14 +138,12 @@ describe("FrameDecoder", () => {
 
     it("reset clears internal buffer", () => {
         const decoder = new FrameDecoder();
-        const msg: Message = { to: "x", msg: "test" };
+        const msg: Message = { msg: "test" };
         const frame = encode(msg);
 
-        // Feed partial data (just 3 bytes of header)
         decoder.push(frame.subarray(0, 3));
         decoder.reset();
 
-        // After reset, feeding a complete new frame should work
         const messages = decoder.push(encode(msg));
         assert.equal(messages.length, 1);
         assert.deepEqual(messages[0], msg);

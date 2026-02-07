@@ -136,7 +136,7 @@ describe("Edge cases", () => {
         const received: Message[] = [];
         client3.on("message", (msg: Message) => received.push(msg));
 
-        client1.send({ to: "test", msg: "after disconnect" });
+        client1.send({ msg: "after disconnect" });
         await new Promise((r) => setTimeout(r, 50));
 
         assert.equal(received.length, 1);
@@ -221,7 +221,7 @@ describe("Edge cases", () => {
         for (let i = 0; i < 10; i++) {
             const client = new ChannelClient(sockPath);
             await client.connect();
-            client.send({ to: "test", msg: `cycle ${i}` });
+            client.send({ msg: `cycle ${i}` });
             client.disconnect();
         }
 
@@ -251,7 +251,7 @@ describe("Edge cases", () => {
             largeData[`key-${i}`] = "x".repeat(100);
         }
 
-        client1.send({ to: "test", msg: "large message", data: largeData });
+        client1.send({ msg: "large message", data: largeData });
         await new Promise((r) => setTimeout(r, 200));
 
         assert.equal(received.length, 1);

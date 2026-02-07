@@ -31,10 +31,10 @@ const client = new ChannelClient("/tmp/channels/my-group/general.sock");
 await client.connect();
 
 client.on("message", (msg) => {
-    console.log(`[${msg.to}] ${msg.msg}`);
+    console.log(msg.msg);
 });
 
-client.send({ to: "general", msg: "hello from a1", data: { status: "ready" } });
+client.send({ msg: "hello from a1", data: { from: "a1", status: "ready" } });
 ```
 
 ## Concepts
@@ -58,15 +58,12 @@ One format for everything:
 
 ```typescript
 interface Message {
-    to: string;                      // Addressing hint — who/what this is for
     msg: string;                     // Human-readable content
     data?: Record<string, unknown>;  // Optional structured payload
 }
 ```
 
-The `to` field is an **addressing hint**, not a routing directive. The library fans out every message to all connected clients regardless of `to`. Consumers use `to` to filter on the receiving end if they want.
-
-Both `to` and `msg` must be non-empty strings. `data`, if present, must be a plain object. The library validates shape but does not interpret content.
+`msg` must be a non-empty string. `data`, if present, must be a plain object. The library validates shape but does not interpret content — use `data` for any metadata you need (sender identity, message type, addressing, etc.).
 
 ### Inboxes
 
@@ -105,7 +102,7 @@ channel.on("connect", (clientId) => { /* client connected */ });
 channel.on("disconnect", (clientId) => { /* client disconnected */ });
 channel.on("error", (err) => { /* server or client error */ });
 
-channel.broadcast({ to: "all", msg: "from the server" });  // to everyone
+channel.broadcast({ msg: "announcement from the server" });  // to everyone
 console.log(channel.clientCount);  // number of connected clients
 console.log(channel.started);      // whether listening
 console.log(channel.path);         // socket path
@@ -128,7 +125,7 @@ client.on("connect", () => { /* connected */ });
 client.on("disconnect", () => { /* connection lost */ });
 client.on("error", (err) => { /* error */ });
 
-client.send({ to: "general", msg: "hello" });
+client.send({ msg: "hello" });
 console.log(client.connected);  // true
 
 client.disconnect();
@@ -155,14 +152,15 @@ await group.start();  // creates dir, starts all channels, writes group.json
 group.list();               // ["general", "topic-research", "inbox-a1"]
 group.channel("general");   // returns the Channel instance
 
-// Add a channel at runtime
+// Add/remove channels at runtime
 await group.addChannel({ name: "topic-new" });
+await group.removeChannel("topic-new");
 
 await group.stop();                    // stop channels, remove sockets + group.json
 await group.stop({ removeDir: true }); // also remove the directory
 ```
 
-**`group.json`** written on start (and updated on `addChannel`):
+**`group.json`** written on start (and updated on add/remove):
 
 ```json
 {
@@ -183,7 +181,7 @@ Low-level framing utilities, exposed for custom transport implementations:
 ```typescript
 import { encode, FrameDecoder } from "agent-channels";
 
-const frame = encode({ to: "x", msg: "hello" });  // Buffer
+const frame = encode({ msg: "hello" });  // Buffer
 
 const decoder = new FrameDecoder(16 * 1024 * 1024);  // max message size
 const messages = decoder.push(chunk);  // returns Message[]
@@ -195,9 +193,10 @@ decoder.reset();  // clear internal buffer
 ```typescript
 import { isValidMessage } from "agent-channels";
 
-isValidMessage({ to: "a", msg: "b" });              // true
-isValidMessage({ to: "", msg: "b" });                // false (empty to)
-isValidMessage({ to: "a", msg: "b", data: [1] });   // false (data must be object)
+isValidMessage({ msg: "hello" });                    // true
+isValidMessage({ msg: "hi", data: { x: 1 } });      // true
+isValidMessage({ msg: "" });                         // false (empty msg)
+isValidMessage({ msg: "hi", data: [1] });            // false (data must be object)
 ```
 
 ## Design Principles
@@ -205,16 +204,16 @@ isValidMessage({ to: "a", msg: "b", data: [1] });   // false (data must be objec
 - **Zero runtime dependencies.** Node.js builtins only (`net`, `fs`, `path`, `events`).
 - **Protocol-agnostic.** No opinions about what messages mean. No routing logic.
 - **Filesystem is the router.** Channels are sockets in a directory. Addressing is "which socket do you connect to."
-- **One message format.** `{to, msg, data}`. No typed messages, no schema enforcement on `data`.
-- **No networking.** Unix sockets only. Use bridges for TCP, WebSocket, etc.
+- **One message format.** `{msg, data}`. No typed messages, no schema enforcement on `data`.
+- **Bridges for external systems.** TCP, Discord, Matrix — each is a bridge that translates between local channels and an external protocol. The library ships a TCP bridge; others are separate packages.
 
 ## What It Doesn't Do
 
 - **Authentication.** Anyone on the machine can connect to any socket.
 - **Encryption.** Messages are plaintext.
-- **Routing.** Fan-out only. The library doesn't route based on `to`.
+- **Routing.** Fan-out only. Which channel you write to is the routing.
 - **Auto-reconnect.** Consumers handle reconnection.
-- **Backpressure.** OS socket buffers handle it. If a client falls behind, it was probably dead.
+- **Backpressure.** OS socket buffers handle it.
 
 ## License
 

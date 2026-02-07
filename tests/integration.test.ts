@@ -91,7 +91,6 @@ describe("Integration", () => {
 
         // 1. Agent a1 posts a finding to General
         agents[0]!.general.send({
-            to: "general",
             msg: "Found the bug in framing.ts",
             data: { from: "a1", type: "finding" },
         });
@@ -108,7 +107,6 @@ describe("Integration", () => {
         const queenInboxClient = track(new ChannelClient(path.join(groupPath, "inbox-queen.sock")));
         await queenInboxClient.connect();
         queenInboxClient.send({
-            to: "queen",
             msg: "Blocked on permissions — need sudo",
             data: { from: "a2", type: "blocker" },
         });
@@ -121,7 +119,6 @@ describe("Integration", () => {
         const a3InboxClient = track(new ChannelClient(path.join(groupPath, "inbox-a3.sock")));
         await a3InboxClient.connect();
         a3InboxClient.send({
-            to: "a3",
             msg: "Take over a2's task — they're blocked",
             data: { from: "queen", type: "instruction" },
         });
@@ -133,7 +130,6 @@ describe("Integration", () => {
 
         // 4. Agent a3 signals done to queen inbox + general
         const doneMsg: Message = {
-            to: "queen",
             msg: "Task complete — wrote findings to hive-mind",
             data: { from: "a3", type: "done" },
         };
@@ -145,7 +141,6 @@ describe("Integration", () => {
 
         // Also post to general
         agents[2]!.general.send({
-            to: "general",
             msg: "Done — wrote findings",
             data: { from: "a3", type: "done" },
         });
@@ -203,9 +198,9 @@ describe("Integration", () => {
         g2c2.on("message", (msg: Message) => g2received.push(msg));
 
         // Send on group 1 — should NOT appear on group 2
-        g1c1.send({ to: "general", msg: "group 1 only" });
+        g1c1.send({ msg: "group 1 only" });
         // Send on group 2 — should NOT appear on group 1
-        g2c1.send({ to: "general", msg: "group 2 only" });
+        g2c1.send({ msg: "group 2 only" });
 
         await new Promise((r) => setTimeout(r, 50));
 
@@ -244,7 +239,7 @@ describe("Integration", () => {
         const received: Message[] = [];
         topicClient2.on("message", (msg: Message) => received.push(msg));
 
-        topicClient1.send({ to: "topic-research", msg: "research finding" });
+        topicClient1.send({ msg: "research finding" });
         await new Promise((r) => setTimeout(r, 50));
 
         assert.equal(received.length, 1);
@@ -281,7 +276,7 @@ describe("Integration", () => {
 
         // Send 500 messages rapidly
         for (let i = 0; i < messageCount; i++) {
-            sender.send({ to: "firehose", msg: `msg-${i}`, data: { seq: i } });
+            sender.send({ msg: `msg-${i}`, data: { seq: i } });
         }
 
         // Wait for all to arrive (with timeout)
@@ -325,7 +320,6 @@ describe("Integration", () => {
             const writer = new ChannelClient(path.join(groupPath, "inbox-queen.sock"));
             await writer.connect();
             writer.send({
-                to: "queen",
                 msg: `Report from ${agentName}`,
                 data: { from: agentName },
             });

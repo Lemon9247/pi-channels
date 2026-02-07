@@ -80,7 +80,7 @@ describe("ChannelClient", () => {
 
     it("send throws when not connected", () => {
         const client = new ChannelClient("/nonexistent.sock");
-        assert.throws(() => client.send({ to: "a", msg: "b" }), /Not connected/);
+        assert.throws(() => client.send({ msg: "b" }), /Not connected/);
     });
 
     it("throws on double connect", async () => {
@@ -134,8 +134,8 @@ describe("ChannelClient", () => {
         const received: Message[] = [];
         receiver.on("message", (msg: Message) => received.push(msg));
 
-        sender.send({ to: "receiver", msg: "hello", data: { n: 1 } });
-        sender.send({ to: "receiver", msg: "world", data: { n: 2 } });
+        sender.send({ msg: "hello", data: { n: 1 } });
+        sender.send({ msg: "world", data: { n: 2 } });
 
         await new Promise((r) => setTimeout(r, 50));
 
