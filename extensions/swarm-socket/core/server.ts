@@ -147,14 +147,11 @@ export class SwarmServer {
                         continue;
                     }
                     this.handleRegister(transport, raw as RegisterMessage, preClient);
-                    // After registration, find the client
-                    for (const c of this.clients.values()) {
-                        if (c.transport === transport) {
-                            client = c;
-                            // Transfer any remaining buffer
-                            client.buffer = state.buffer;
-                            break;
-                        }
+                    // After registration, find the client via WeakMap (O(1))
+                    client = this.transportToClient.get(transport);
+                    if (client) {
+                        // Transfer any remaining buffer
+                        client.buffer = state.buffer;
                     }
                 } else {
                     if (!validateClientMessage(raw)) {
