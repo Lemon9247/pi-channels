@@ -155,7 +155,8 @@ export class SwarmServer {
                     }
                 } else {
                     if (!validateClientMessage(raw)) {
-                        this.sendTo(transport, serialize({ type: "error", message: "Invalid message format" }));
+                        const preview = JSON.stringify(raw).slice(0, 200);
+                        this.sendTo(transport, serialize({ type: "error", message: `Invalid message format: ${preview}` }));
                         continue;
                     }
                     this.handleMessage(client, raw as ClientMessage);
