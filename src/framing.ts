@@ -65,10 +65,12 @@ export class FrameDecoder {
             try {
                 parsed = JSON.parse(json);
             } catch {
+                this.buffer = Buffer.alloc(0);
                 throw new Error(`Invalid JSON in message frame: ${json.slice(0, 100)}`);
             }
 
             if (!isValidMessage(parsed)) {
+                this.buffer = Buffer.alloc(0);
                 throw new Error(
                     `Invalid message format: ${JSON.stringify(parsed).slice(0, 200)}`
                 );

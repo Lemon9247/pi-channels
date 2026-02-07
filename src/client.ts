@@ -77,8 +77,11 @@ export class ChannelClient extends EventEmitter {
 
     /** Disconnect from the channel. */
     disconnect(): void {
-        if (this.socket && !this.socket.destroyed) {
-            this.socket.destroy();
+        if (this.socket) {
+            this.socket.removeAllListeners();
+            if (!this.socket.destroyed) {
+                this.socket.destroy();
+            }
         }
         this._connected = false;
         this.socket = null;

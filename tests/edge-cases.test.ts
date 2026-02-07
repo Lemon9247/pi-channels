@@ -6,7 +6,7 @@ import * as os from "node:os";
 import * as net from "node:net";
 import { Channel } from "../src/channel.js";
 import { ChannelClient } from "../src/client.js";
-import { encode } from "../src/framing.js";
+import type { Message } from "../src/message.js";
 
 function tmpSocketPath(): string {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "edge-test-"));
@@ -133,8 +133,8 @@ describe("Edge cases", () => {
         await new Promise((r) => setTimeout(r, 30));
 
         // client1 sends — should reach client3, not crash
-        const received: any[] = [];
-        client3.on("message", (msg: any) => received.push(msg));
+        const received: Message[] = [];
+        client3.on("message", (msg: Message) => received.push(msg));
 
         client1.send({ to: "test", msg: "after disconnect" });
         await new Promise((r) => setTimeout(r, 50));
@@ -242,8 +242,8 @@ describe("Edge cases", () => {
         await client1.connect();
         await client2.connect();
 
-        const received: any[] = [];
-        client2.on("message", (msg: any) => received.push(msg));
+        const received: Message[] = [];
+        client2.on("message", (msg: Message) => received.push(msg));
 
         // Send a message with a large data payload (~100KB)
         const largeData: Record<string, string> = {};

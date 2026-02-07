@@ -271,6 +271,65 @@ describe("ChannelGroup", () => {
         await group.stop({ removeDir: true }); // Should not throw
     });
 
+    it("works with zero channels", async () => {
+        const groupPath = tmpGroupPath();
+        const group = track(new ChannelGroup({ path: groupPath, channels: [] }));
+
+        await group.start();
+        assert.ok(group.started);
+        assert.deepEqual(group.list(), []);
+
+        // group.json should exist with empty channels array
+        const meta = JSON.parse(fs.readFileSync(path.join(groupPath, "group.json"), "utf-8"));
+        assert.deepEqual(meta.channels, []);
+
+        await group.stop({ removeDir: true });
+    });
+
+    it("removeChannel stops and removes a channel", async () => {
+        const groupPath = tmpGroupPath();
+        const group = track(new ChannelGroup({
+            path: groupPath,
+            channels: [{ name: "general" }, { name: "inbox-a1", inbox: true }],
+        }));
+
+        await group.start();
+        assert.equal(group.list().length, 2);
+
+        await group.removeChannel("inbox-a1");
+        assert.equal(group.list().length, 1);
+        assert.ok(!group.list().includes("inbox-a1"));
+        assert.ok(!fs.existsSync(path.join(groupPath, "inbox-a1.sock")));
+
+        // group.json updated
+        const meta = JSON.parse(fs.readFileSync(path.join(groupPath, "group.json"), "utf-8"));
+        assert.equal(meta.channels.length, 1);
+
+        await group.stop({ removeDir: true });
+    });
+
+    it("removeChannel throws for unknown name", async () => {
+        const groupPath = tmpGroupPath();
+        const group = track(new ChannelGroup({
+            path: groupPath,
+            channels: [{ name: "general" }],
+        }));
+
+        await group.start();
+        await assert.rejects(() => group.removeChannel("nonexistent"), /not found/);
+
+        await group.stop({ removeDir: true });
+    });
+
+    it("removeChannel throws when group not started", async () => {
+        const group = new ChannelGroup({
+            path: tmpGroupPath(),
+            channels: [{ name: "general" }],
+        });
+
+        await assert.rejects(() => group.removeChannel("general"), /not started/);
+    });
+
     it("exposes path property", () => {
         const groupPath = "/tmp/test-group";
         const group = new ChannelGroup({ path: groupPath, channels: [] });

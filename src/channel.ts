@@ -5,8 +5,6 @@ import * as path from "node:path";
 import { type Message } from "./message.js";
 import { encode, FrameDecoder } from "./framing.js";
 
-let nextClientId = 0;
-
 export interface ChannelOptions {
     /** Path to the Unix domain socket file. */
     path: string;
@@ -39,6 +37,7 @@ export class Channel extends EventEmitter {
     private server: net.Server | null = null;
     private clients: Map<string, ConnectedClient> = new Map();
     private _started = false;
+    private nextClientId = 0;
 
     constructor(options: ChannelOptions) {
         super();
@@ -64,20 +63,18 @@ export class Channel extends EventEmitter {
                 this.handleConnection(socket);
             });
 
-            server.on("error", (err) => {
-                this.emit("error", err);
-            });
+            const onStartError = (err: Error) => {
+                reject(err);
+            };
+
+            server.once("error", onStartError);
 
             server.listen(this.socketPath, () => {
+                server.removeListener("error", onStartError);
+                server.on("error", (err) => this.emit("error", err));
                 this._started = true;
                 this.server = server;
                 resolve();
-            });
-
-            server.once("error", (err) => {
-                if (!this._started) {
-                    reject(err);
-                }
             });
         });
     }
@@ -135,7 +132,7 @@ export class Channel extends EventEmitter {
     }
 
     private handleConnection(socket: net.Socket): void {
-        const clientId = `client-${nextClientId++}`;
+        const clientId = `client-${this.nextClientId++}`;
         const decoder = new FrameDecoder();
         const client: ConnectedClient = { id: clientId, socket, decoder };
 
@@ -214,7 +211,13 @@ export class Channel extends EventEmitter {
         return new Promise<void>((resolve, reject) => {
             const testSocket = net.connect(this.socketPath);
 
+            const timeout = setTimeout(() => {
+                testSocket.destroy();
+                reject(new Error(`Timeout checking stale socket: ${this.socketPath}`));
+            }, 2000);
+
             testSocket.on("connect", () => {
+                clearTimeout(timeout);
                 // Something is listening — socket is in use
                 testSocket.destroy();
                 reject(
@@ -225,6 +228,7 @@ export class Channel extends EventEmitter {
             });
 
             testSocket.on("error", (err) => {
+                clearTimeout(timeout);
                 const code = (err as NodeJS.ErrnoException).code;
                 if (code === "ECONNREFUSED" || code === "ENOTSOCK") {
                     // Stale socket — safe to remove

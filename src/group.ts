@@ -58,10 +58,8 @@ export class ChannelGroup {
         // Create group directory
         fs.mkdirSync(this.groupPath, { recursive: true });
 
-        // Start all channels
-        for (const def of this.channelDefs) {
-            await this.startChannel(def);
-        }
+        // Start all channels in parallel
+        await Promise.all(this.channelDefs.map((def) => this.startChannel(def)));
 
         this._started = true;
 
@@ -134,6 +132,29 @@ export class ChannelGroup {
         this.writeGroupJson();
 
         return channel;
+    }
+
+    /** Remove a channel from a running group. Stops the channel and removes its socket. */
+    async removeChannel(name: string): Promise<void> {
+        if (!this._started) {
+            throw new Error("ChannelGroup not started — call start() first");
+        }
+
+        const channel = this.channels.get(name);
+        if (!channel) {
+            throw new Error(`Channel "${name}" not found in group`);
+        }
+
+        await channel.stop();
+        this.channels.delete(name);
+
+        const idx = this.channelDefs.findIndex((d) => d.name === name);
+        if (idx !== -1) {
+            this.channelDefs.splice(idx, 1);
+        }
+
+        // Re-write group.json
+        this.writeGroupJson();
     }
 
     /** Whether the group is currently running. */
