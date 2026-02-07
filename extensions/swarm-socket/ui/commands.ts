@@ -14,7 +14,6 @@ import { getSwarmState, type AgentInfo, type AgentStatus, cleanupSwarm, graceful
 import { getIdentity, buildChildrenMap } from "../core/identity.js";
 import { getAgentActivity, clearActivity, type ActivityEvent } from "./activity.js";
 import { clearDashboard } from "./dashboard.js";
-import { serialize, type RelayedMessage } from "../transport/protocol.js";
 
 function statusIcon(status: AgentStatus): string {
     switch (status) {
@@ -115,19 +114,13 @@ export function registerSwarmCommand(pi: ExtensionAPI): void {
 
             ctx.ui.notify("Sending shutdown signal to all agents (30s timeout)...", "info");
 
-            // Bypass server routing — broadcast directly to all connected clients.
+            const identity = getIdentity();
             const sendInstruct = (instruction: string) => {
-                const msg = serialize({
-                    from: { name: "queen", role: "queen" },
-                    message: { type: "instruct" as const, instruction },
-                } as RelayedMessage);
-                for (const client of state.server!.getClients().values()) {
-                    try {
-                        if (client.transport.connected) {
-                            client.transport.write(msg);
-                        }
-                    } catch { /* transport may have closed */ }
-                }
+                state.server!.broadcastInstruct(instruction, {
+                    name: identity.name,
+                    role: identity.role,
+                    swarm: identity.swarm,
+                });
             };
 
             await gracefulShutdown(state.server, sendInstruct);

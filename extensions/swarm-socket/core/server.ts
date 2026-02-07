@@ -108,6 +108,22 @@ export class SwarmServer {
         return this.router.canReach(from, to);
     }
 
+    /**
+     * Broadcast an instruct message to all connected clients.
+     * Encapsulates wire format details so callers don't need to import
+     * serialize/RelayedMessage from the protocol layer.
+     */
+    broadcastInstruct(instruction: string, from: { name: string; role: string; swarm?: string }): void {
+        const relayed: RelayedMessage = {
+            from: { name: from.name, role: from.role as Role, swarm: from.swarm },
+            message: { type: "instruct" as const, instruction },
+        };
+        const msg = serialize(relayed);
+        for (const client of this.clients.values()) {
+            this.sendTo(client.transport, msg);
+        }
+    }
+
     private handleConnection(transport: Transport): void {
         this.unregistered.add(transport);
 
