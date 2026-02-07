@@ -157,6 +157,18 @@ async function main() {
         assert(getSwarmState() === null, "state cleaned up");
     });
 
+    // T2: gracefulShutdown timeout test — SKIPPED
+    // The gracefulShutdown function has a hardcoded 30-second timeout with 2-second polling.
+    // Testing the timeout path (agents never finish → cleanup after 30s) would require either:
+    //   a) Waiting 30+ seconds in a test (unacceptable)
+    //   b) A configurable timeout parameter (requires source change)
+    // Recommendation: Add an optional `timeoutMs` parameter to gracefulShutdown() so tests
+    // can use a short timeout (e.g., 100ms). Then add a test that verifies:
+    //   - Set up state with running agent that never calls done
+    //   - Call gracefulShutdown with timeoutMs=100
+    //   - Verify state is cleaned up after ~100ms
+    // For now, the happy path (agents finish before timeout) is covered above.
+
     await test("gracefulShutdown aborts if swarm replaced during wait", async () => {
         const sock1 = tmpSocketPath();
         const server1 = new SwarmServer(new UnixTransportServer(sock1));

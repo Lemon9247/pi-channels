@@ -3,7 +3,7 @@
  */
 
 import { test, assert, assertEqual, summarize } from "../helpers.js";
-import { parseLines, serialize, validateRegister, validateClientMessage } from "../../transport/protocol.js";
+import { parseLines, serialize, validateRegister, validateClientMessage, isRelayedMessage, normalizeRelayedMessage } from "../../transport/protocol.js";
 
 async function main() {
     console.log("\nProtocol:");
@@ -78,6 +78,55 @@ async function main() {
         assert(validateClientMessage({ type: "instruct", instruction: "do this" }), "instruct valid");
         assert(!validateClientMessage({ type: "unknown" }), "unknown type invalid");
         assert(!validateClientMessage(null), "null invalid");
+    });
+
+    console.log("\nnormalizeRelayedMessage:");
+
+    await test("normalizes old format (from: string) to new (from: MessageSender)", async () => {
+        const oldFormat: any = {
+            from: "agent-1",
+            fromRole: "agent",
+            fromSwarm: "s1",
+            message: { type: "nudge", reason: "test" },
+        };
+        assert(isRelayedMessage(oldFormat), "old format recognized as RelayedMessage");
+
+        const normalized = normalizeRelayedMessage(oldFormat);
+        assertEqual(typeof normalized.from, "object", "from is now an object");
+        assertEqual(normalized.from.name, "agent-1", "name extracted");
+        assertEqual(normalized.from.role, "agent", "role extracted");
+        assertEqual(normalized.from.swarm, "s1", "swarm extracted");
+        assertEqual(normalized.message.type, "nudge", "message preserved");
+    });
+
+    await test("passes through new format (from: MessageSender) unchanged", async () => {
+        const newFormat: any = {
+            from: { name: "agent-1", role: "agent", swarm: "s1" },
+            message: { type: "done", summary: "finished" },
+        };
+        const normalized = normalizeRelayedMessage(newFormat);
+        assertEqual(normalized.from.name, "agent-1", "name unchanged");
+        assertEqual(normalized.from.role, "agent", "role unchanged");
+        assertEqual(normalized.message.type, "done", "message unchanged");
+    });
+
+    await test("old format without fromRole defaults to agent", async () => {
+        const oldFormat: any = {
+            from: "agent-2",
+            message: { type: "blocker", description: "stuck" },
+        };
+        const normalized = normalizeRelayedMessage(oldFormat);
+        assertEqual(normalized.from.role, "agent", "defaults to agent role");
+    });
+
+    await test("old format without fromSwarm leaves swarm undefined", async () => {
+        const oldFormat: any = {
+            from: "queen-1",
+            fromRole: "queen",
+            message: { type: "nudge", reason: "hi" },
+        };
+        const normalized = normalizeRelayedMessage(oldFormat);
+        assertEqual(normalized.from.swarm, undefined, "no swarm when absent");
     });
 }
 
