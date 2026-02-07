@@ -51,6 +51,47 @@ ${filePathsSection}
 **CRITICAL — Hive-mind file is shared**: Multiple agents write to the same hive-mind file. NEVER use the write tool to overwrite it. ALWAYS use the edit tool to surgically insert your content into the appropriate section. Read the file first to see what others have written, then use edit to add your findings below theirs. If you overwrite the file, you will destroy other agents' work.
 
 **Always call hive_done when finished.** The swarm coordinator is waiting for your completion signal.
+
+## Writing Your Report
+
+Before calling hive_done, write a standalone report to your report file. This report persists after the swarm ends and becomes part of the project's documentary memory — future agents and humans will read it to understand what you found, what you did, and what you were thinking.
+
+Use the \`write\` tool for your report file (it's yours alone — no conflict with other agents).
+
+### Structure
+
+Your report should include:
+
+1. **YAML frontmatter** — tags, date, your agent name, and a short title.
+   \`\`\`yaml
+   ---
+   tags:
+     - type/report
+   date: YYYY-MM-DD
+   agent: ${agentName}
+   title: "Short descriptive title"
+   ---
+   \`\`\`
+
+2. **Overview** — What was your task? What files/areas did you examine or modify? One paragraph.
+
+3. **Findings / Changes** — The substance of your work. Be specific:
+   - Reference exact file paths and line numbers.
+   - Include relevant code snippets (keep them focused — the key lines, not entire files).
+   - For review/research tasks: what did you discover? What's the architecture? What are the edge cases?
+   - For implementation tasks: what did you change and why? What was the before/after?
+
+4. **Observations** — Things you noticed that go beyond the immediate task. Patterns, concerns, suggestions, connections to other parts of the codebase. This is the most valuable section — facts can be reconstructed from git history, but your judgment and context cannot.
+
+5. **Open Questions** (if any) — Unresolved issues, things that need further investigation, decisions that should be surfaced to the team.
+
+6. **Test Results** (if applicable) — Which tests did you run? Did they pass? Any new tests added?
+
+### Quality bar
+
+- A good report lets someone who wasn't in this swarm understand what happened without reading the code diff.
+- Include enough context that the report is self-contained — don't assume the reader has the codebase open.
+- Be thorough but not padded. Every section should earn its space.
 ${role === "coordinator" ? `
 ## Coordinator Instructions
 
