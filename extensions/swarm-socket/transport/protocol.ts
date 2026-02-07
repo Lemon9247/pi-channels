@@ -119,7 +119,7 @@ export type ServerMessage = ErrorMessage | RegisteredMessage | RelayedMessage;
 
 // === Serialization ===
 
-export function serialize(msg: ClientMessage | ServerMessage | RelayedMessage): string {
+export function serialize(msg: ClientMessage | ServerMessage): string {
     return JSON.stringify(msg) + "\n";
 }
 
