@@ -23,7 +23,7 @@ import { registerInstructTool } from "./tools/instruct.js";
 import { registerStatusTool } from "./tools/status.js";
 import { registerAgentTools } from "./tools/agent.js";
 import { setupNotifications } from "./ui/notifications.js";
-import { cleanupSwarm, setParentClient } from "./core/state.js";
+import { cleanupSwarm, setParentClient, getParentClient } from "./core/state.js";
 import { registerMessageRenderers } from "./ui/renderers.js";
 import { clearDashboard } from "./ui/dashboard.js";
 import { registerSwarmCommand } from "./ui/commands.js";
