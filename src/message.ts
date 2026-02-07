@@ -4,7 +4,7 @@
  * - `to` — addressing hint: who or what this message is for. The library
  *   does NOT route based on this field — it fans out everything to all
  *   connected clients. Consumers use `to` to filter on the receiving end.
- * - `msg` — human/LLM-readable content.
+ * - `msg` — human-readable content.
  * - `data` — optional structured payload. Consumer-defined, passed through
  *   untouched by the library.
  */
