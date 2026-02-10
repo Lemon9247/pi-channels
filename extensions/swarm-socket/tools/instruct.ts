@@ -2,16 +2,16 @@
  * Swarm Instruct Tool
  *
  * Allows the queen/coordinator to send instructions to specific agents,
- * entire swarms, or broadcast to all agents.
+ * entire swarms, or broadcast to all agents via channels.
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { getSwarmState, getParentClient } from "../core/state.js";
+import type { Message } from "../../../../agent-channels/dist/index.js";
+import { getSwarmState, getParentClients } from "../core/state.js";
 import { getIdentity } from "../core/identity.js";
-import { serialize } from "../transport/protocol.js";
-import type { SenderInfo } from "../core/router.js";
+import { inboxName, GENERAL_CHANNEL, QUEEN_INBOX } from "../core/channels.js";
 
 export function registerInstructTool(pi: ExtensionAPI): void {
     pi.registerTool({
@@ -36,103 +36,130 @@ export function registerInstructTool(pi: ExtensionAPI): void {
                 };
             }
 
-            if (!state.server) {
-                // Coordinator without a local server — route through parent socket
-                const parentClient = getParentClient();
-                if (!parentClient || !parentClient.connected) {
+            const identity = getIdentity();
+            const msg: Message = {
+                msg: params.instruction,
+                data: {
+                    type: "instruct",
+                    from: identity.name,
+                    instruction: params.instruction,
+                    to: params.to,
+                    swarm: params.swarm,
+                },
+            };
+
+            // If we have queen clients (we're the queen/coordinator who started this swarm)
+            if (state.queenClients.size > 0) {
+                if (params.to) {
+                    // Target a specific agent's inbox
+                    const targetInbox = inboxName(params.to);
+                    const client = state.queenClients.get(targetInbox);
+
+                    if (client?.connected) {
+                        try {
+                            client.send(msg);
+                            return {
+                                content: [{ type: "text", text: `Instruction sent to ${params.to}: "${params.instruction}"` }],
+                                details: { target: params.to },
+                            };
+                        } catch { /* fall through */ }
+                    }
+
+                    // Agent not found locally — try general broadcast
+                    // (other coordinators may forward it)
+                    const generalClient = state.queenClients.get(GENERAL_CHANNEL);
+                    if (generalClient?.connected) {
+                        try {
+                            generalClient.send(msg);
+                            return {
+                                content: [{ type: "text", text: `Instruction broadcast (target "${params.to}" not found locally): "${params.instruction}"` }],
+                                details: { target: params.to, broadcast: true },
+                            };
+                        } catch { /* fall through */ }
+                    }
+
+                    // Also try routing through parent channels (coordinator case)
+                    const parentClients = getParentClients();
+                    if (parentClients) {
+                        const parentGeneral = parentClients.get(GENERAL_CHANNEL);
+                        if (parentGeneral?.connected) {
+                            try {
+                                parentGeneral.send(msg);
+                                return {
+                                    content: [{ type: "text", text: `Instruction forwarded via parent channels to "${params.to}": "${params.instruction}"` }],
+                                    details: { target: params.to, routed: true },
+                                };
+                            } catch { /* fall through */ }
+                        }
+                    }
+
                     return {
-                        content: [{ type: "text", text: "Not connected to parent socket. Cannot route instruction." }],
+                        content: [{ type: "text", text: `No route to agent "${params.to}".` }],
                         details: {},
                         isError: true,
                     };
-                }
-                parentClient.instruct(params.instruction, params.to, params.swarm);
-                return {
-                    content: [{ type: "text", text: `Instruction relayed via parent socket: "${params.instruction}"` }],
-                    details: { target: params.to || params.swarm || "all" },
-                };
-            }
+                } else if (params.swarm) {
+                    // Target all agents in a specific swarm — send to general (they'll filter)
+                    const generalClient = state.queenClients.get(GENERAL_CHANNEL);
+                    if (generalClient?.connected) {
+                        try {
+                            generalClient.send(msg);
+                        } catch { /* ignore */ }
+                    }
 
-            // We own the server — send instruct through it
-            const server = state.server;
-            const clients = server.getClients();
-
-            // Build the instruct message
-            const msg = {
-                type: "instruct" as const,
-                instruction: params.instruction,
-                to: params.to,
-                swarm: params.swarm,
-            };
-
-            // Use identity for sender info instead of hardcoded "queen"
-            const identity = getIdentity();
-            const sender: SenderInfo = {
-                name: identity.name,
-                role: identity.role,
-                swarm: identity.swarm,
-            };
-
-            let recipients = server.getRecipients(sender, msg);
-
-            // If targeting a specific agent that's not on this socket,
-            // forward to all coordinators — they'll check their own agents
-            if (recipients.length === 0 && params.to) {
-                const coordinators = Array.from(clients.values()).filter(c => c.role === "coordinator");
-                if (coordinators.length > 0) {
-                    recipients = coordinators;
-                }
-            }
-
-            if (recipients.length === 0) {
-                // Parent-socket fallback: if we're a coordinator with a local server
-                // but the target isn't here, route through the parent socket to reach peers
-                const parentClient = getParentClient();
-                if (parentClient && parentClient.connected) {
-                    parentClient.instruct(params.instruction, params.to, params.swarm);
+                    // Count matching agents
+                    const matchingAgents = Array.from(state.agents.values())
+                        .filter(a => a.swarm === params.swarm);
                     return {
-                        content: [{ type: "text", text: `Instruction forwarded via parent socket to "${params.to || params.swarm || "all"}" (delivery not confirmed — async routing)` }],
-                        details: { target: params.to || params.swarm || "all", routed: true },
+                        content: [{
+                            type: "text",
+                            text: `Instruction broadcast to swarm "${params.swarm}" (${matchingAgents.length} agents): "${params.instruction}"`,
+                        }],
+                        details: { swarm: params.swarm, agentCount: matchingAgents.length },
+                    };
+                } else {
+                    // Broadcast to all — send to general channel
+                    const generalClient = state.queenClients.get(GENERAL_CHANNEL);
+                    if (generalClient?.connected) {
+                        try {
+                            generalClient.send(msg);
+                        } catch { /* ignore */ }
+                    }
+
+                    return {
+                        content: [{
+                            type: "text",
+                            text: `Instruction broadcast to all agents: "${params.instruction}"`,
+                        }],
+                        details: { target: "all" },
                     };
                 }
-
-                const target = params.to || params.swarm || "all";
-                return {
-                    content: [{ type: "text", text: `No agents found for target "${target}".` }],
-                    details: {},
-                    isError: true,
-                };
             }
 
-            // Send to each recipient
-            const relayed = {
-                from: { name: identity.name, role: identity.role, swarm: identity.swarm },
-                message: msg,
-            };
-            const data = serialize(relayed);
-
-            for (const recipient of recipients) {
-                try {
-                    if (recipient.transport.connected) {
-                        recipient.transport.write(data);
-                    }
-                } catch {
-                    // Transport may have closed
+            // No queen clients — we're a coordinator without a local swarm
+            // Route through parent channels
+            const parentClients = getParentClients();
+            if (parentClients) {
+                const target = params.to ? inboxName(params.to) : GENERAL_CHANNEL;
+                const client = parentClients.get(target) || parentClients.get(GENERAL_CHANNEL);
+                if (client?.connected) {
+                    try {
+                        client.send(msg);
+                        return {
+                            content: [{
+                                type: "text",
+                                text: `Instruction relayed via parent channels: "${params.instruction}"`,
+                            }],
+                            details: { target: params.to || params.swarm || "all" },
+                        };
+                    } catch { /* fall through */ }
                 }
             }
 
-            const names = recipients.map((r) => r.name).join(", ");
-            const forwarded = recipients.some(r => r.role === "coordinator") && params.to;
             return {
-                content: [
-                    {
-                        type: "text",
-                        text: forwarded
-                            ? `Instruction forwarded via coordinator(s) to "${params.to}": ${names}\n"${params.instruction}"`
-                            : `Instruction sent to ${recipients.length} agent(s): ${names}\n"${params.instruction}"`,
-                    },
-                ],
-                details: { recipients: names },
+                content: [{ type: "text", text: "Not connected to any channels. Cannot send instruction." }],
+                details: {},
+                isError: true,
             };
         },
 
