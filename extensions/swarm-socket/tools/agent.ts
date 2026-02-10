@@ -169,10 +169,10 @@ export function registerAgentTools(pi: ExtensionAPI): void {
 
             let sent = false;
             if (params.to) {
-                // Targeted: send to specific agent's inbox
-                sent = sendToChannel(inboxName(params.to), msg);
-                // Also send to general so queen sees it
-                sendToChannel(GENERAL_CHANNEL, msg);
+                // Targeted: send to specific agent's inbox + general so queen sees it
+                const sentInbox = sendToChannel(inboxName(params.to), msg);
+                const sentGeneral = sendToChannel(GENERAL_CHANNEL, msg);
+                sent = sentInbox || sentGeneral;
             } else {
                 // Broadcast: send to general
                 sent = sendToChannel(GENERAL_CHANNEL, msg);
@@ -287,9 +287,9 @@ export function registerAgentTools(pi: ExtensionAPI): void {
 
             // Send to both queen inbox and general
             const sentQueen = sendToChannel(QUEEN_INBOX, msg);
-            sendToChannel(GENERAL_CHANNEL, msg);
+            const sentGeneral = sendToChannel(GENERAL_CHANNEL, msg);
 
-            if (!sentQueen) {
+            if (!sentQueen && !sentGeneral) {
                 return {
                     content: [{ type: "text", text: "Not connected to swarm channels. Done signal not sent." }],
                     details: {},

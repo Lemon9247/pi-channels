@@ -15,8 +15,10 @@
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import type { ChannelClient, Message } from "../../../../agent-channels/dist/index.js";
+import { getIdentity } from "../core/identity.js";
 
 export function setupNotifications(pi: ExtensionAPI, clients: Map<string, ChannelClient>): void {
+    const identity = getIdentity();
     for (const [channelName, client] of clients.entries()) {
         client.on("message", (msg: Message) => {
             if (!msg.data || !msg.data.type) return;
@@ -43,6 +45,8 @@ export function setupNotifications(pi: ExtensionAPI, clients: Map<string, Channe
                 }
 
                 case "instruct": {
+                    const to = msg.data.to as string | undefined;
+                    if (to && to !== identity.name) break;
                     const instruction = (msg.data.instruction as string) || msg.msg;
                     const from = (msg.data.from as string) || "queen";
                     const text =
@@ -60,6 +64,8 @@ export function setupNotifications(pi: ExtensionAPI, clients: Map<string, Channe
                 }
 
                 case "nudge": {
+                    const to = msg.data.to as string | undefined;
+                    if (to && to !== identity.name) break;
                     const reason = (msg.data.reason as string) || msg.msg;
                     let text =
                         `🔔 **Nudge from ${senderName}** (${senderRole}): ${reason}\n\n`;
