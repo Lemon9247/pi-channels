@@ -77,14 +77,16 @@ export function registerAgentTools(pi: ExtensionAPI): void {
                 data: {
                     type: "progress",
                     from: identity.name,
+                    role: identity.role,
                     phase: params.phase,
                     percent: params.percent,
                     detail: params.detail,
                 },
             };
 
-            const sent = sendToChannel(QUEEN_INBOX, msg);
-            if (!sent) {
+            const sentQueen = sendToChannel(QUEEN_INBOX, msg);
+            const sentGeneral = sendToChannel(GENERAL_CHANNEL, msg);
+            if (!sentQueen && !sentGeneral) {
                 return {
                     content: [{ type: "text", text: "Not connected to swarm channels. Progress not sent." }],
                     details: {},
@@ -225,12 +227,14 @@ export function registerAgentTools(pi: ExtensionAPI): void {
                 data: {
                     type: "blocker",
                     from: identity.name,
+                    role: identity.role,
                     description: params.description,
                 },
             };
 
-            const sent = sendToChannel(QUEEN_INBOX, msg);
-            if (!sent) {
+            const sentQueen = sendToChannel(QUEEN_INBOX, msg);
+            const sentGeneral = sendToChannel(GENERAL_CHANNEL, msg);
+            if (!sentQueen && !sentGeneral) {
                 return {
                     content: [{ type: "text", text: "Not connected to swarm channels. Blocker not sent." }],
                     details: {},

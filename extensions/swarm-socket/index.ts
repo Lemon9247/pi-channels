@@ -20,6 +20,7 @@ import { registerStatusTool } from "./tools/status.js";
 import { registerAgentTools } from "./tools/agent.js";
 import { setupNotifications } from "./ui/notifications.js";
 import { cleanupSwarm, setParentClients, getParentClients } from "./core/state.js";
+import { GENERAL_CHANNEL } from "./core/channels.js";
 import { registerMessageRenderers } from "./ui/renderers.js";
 import { clearDashboard } from "./ui/dashboard.js";
 import { registerSwarmCommand } from "./ui/commands.js";
@@ -49,6 +50,19 @@ export default function (pi: ExtensionAPI) {
 
                 // Set up incoming message handler
                 setupNotifications(pi, clients);
+
+                // Send registration message so queen knows we're running
+                const generalClient = clients.get(GENERAL_CHANNEL);
+                if (generalClient?.connected) {
+                    generalClient.send({
+                        msg: "register",
+                        data: {
+                            type: "register",
+                            from: identity.name,
+                            role: identity.role,
+                        },
+                    });
+                }
 
                 if (ctx.hasUI) {
                     ctx.ui.setStatus("swarm", `🐝 ${identity.name} (${identity.role})`);

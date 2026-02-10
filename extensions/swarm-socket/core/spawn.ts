@@ -18,7 +18,7 @@ import * as path from "node:path";
 import { createSwarmSystemPrompt } from "./prompts.js";
 import { type AgentConfig } from "./agents.js";
 import type { AgentFiles } from "./scaffold.js";
-import { ENV, inboxName, GENERAL_CHANNEL } from "./channels.js";
+import { ENV, inboxName, GENERAL_CHANNEL, QUEEN_INBOX } from "./channels.js";
 
 export function writePromptToTempFile(name: string, prompt: string): { dir: string; filePath: string } {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-swarm-"));
@@ -97,7 +97,7 @@ export function spawnAgent(
         // Channel configuration
         [ENV.GROUP]: channelGroupPath,
         [ENV.INBOX]: inbox,
-        [ENV.SUBSCRIBE]: GENERAL_CHANNEL,
+        [ENV.SUBSCRIBE]: [GENERAL_CHANNEL, QUEEN_INBOX].join(","),
         [ENV.NAME]: agentDef.name,
         // Legacy/role info (still useful for identity)
         PI_SWARM_AGENT_NAME: agentDef.name,

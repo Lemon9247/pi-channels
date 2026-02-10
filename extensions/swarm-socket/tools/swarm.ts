@@ -176,6 +176,13 @@ function handleQueenMessage(
     const senderName = (msg.data.from as string) || "unknown";
 
     switch (type) {
+        case "register": {
+            updateAgentStatus(senderName, "running");
+            pushSyntheticEvent(senderName, "message", `registered (${msg.data.role || "agent"})`);
+            updateDashboard(ctx);
+            break;
+        }
+
         case "done": {
             const summary = (msg.data.summary as string) || "";
             updateAgentStatus(senderName, "done", { doneSummary: summary });
@@ -461,13 +468,6 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                     handleQueenMessage(currentState, gen, msg, channelName, agentMap, ctx, pi);
                 });
             }
-
-            // Track agent registrations via the general channel
-            // Agents send a "register" message when they connect
-            const generalChannel = group.channel(GENERAL_CHANNEL);
-            generalChannel.on("connect", (_clientId: string) => {
-                // A client connected to general — we'll get their register message soon
-            });
 
             // Cache agent discovery once for all spawns
             const knownAgents = discoverAgents(ctx.cwd);
