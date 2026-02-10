@@ -26,43 +26,42 @@ const tests = findTests(testsDir).sort();
 console.log(`Found ${tests.length} test files:\n`);
 
 let allPassed = true;
-let totalTests = 0;
+let totalPassed = 0;
 let totalFailed = 0;
 
 for (const testFile of tests) {
     const rel = path.relative(testsDir, testFile);
     console.log(`━━━ ${rel} ━━━`);
     try {
-        const output = execSync(`npx tsx "${testFile}"`, {
+        const output = execSync(`npx tsx --test "${testFile}"`, {
             encoding: "utf-8",
             stdio: ["ignore", "pipe", "pipe"],
             cwd: path.resolve(testsDir, ".."),
+            timeout: 30_000,
         });
         process.stdout.write(output);
 
-        // Parse the summary line for totals
-        const match = output.match(/(\d+) tests: (\d+) passed, (\d+) failed/);
-        if (match) {
-            totalTests += parseInt(match[1]);
-            totalFailed += parseInt(match[3]);
-        }
+        // Parse pass/fail from output
+        const passMatch = output.match(/ℹ pass (\d+)/);
+        const failMatch = output.match(/ℹ fail (\d+)/);
+        if (passMatch) totalPassed += parseInt(passMatch[1]);
+        if (failMatch) totalFailed += parseInt(failMatch[1]);
     } catch (err: any) {
         allPassed = false;
         if (err.stdout) process.stdout.write(err.stdout);
         if (err.stderr) process.stderr.write(err.stderr);
-        // Try to parse even on failure
+
         const output = err.stdout || "";
-        const match = output.match(/(\d+) tests: (\d+) passed, (\d+) failed/);
-        if (match) {
-            totalTests += parseInt(match[1]);
-            totalFailed += parseInt(match[3]);
-        }
+        const passMatch = output.match(/ℹ pass (\d+)/);
+        const failMatch = output.match(/ℹ fail (\d+)/);
+        if (passMatch) totalPassed += parseInt(passMatch[1]);
+        if (failMatch) totalFailed += parseInt(failMatch[1]);
     }
     console.log();
 }
 
 console.log(`\n${"═".repeat(40)}`);
-console.log(`Total: ${totalTests} tests, ${totalTests - totalFailed} passed, ${totalFailed} failed`);
+console.log(`Total: ${totalPassed + totalFailed} tests, ${totalPassed} passed, ${totalFailed} failed`);
 console.log(`${"═".repeat(40)}`);
 
 process.exit(allPassed ? 0 : 1);
