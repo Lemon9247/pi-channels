@@ -23,7 +23,7 @@ For simple, sequential tasks, use the `subagent` tool instead.
 
 Swarms come in two shapes. Choose based on the task:
 
-### Flat Swarm (2-6 agents, one socket)
+### Flat Swarm (2-6 agents, one channel group)
 
 Use when all agents work on parts of the same problem and report directly to you.
 
@@ -36,29 +36,31 @@ Queen (you, interactive)
 
 **Good for**: code review, codebase research, parallel implementation of independent files.
 
-### Hierarchical Swarm (coordinators + agents, per-swarm sockets)
+### Multi-Team Swarm (sub-teams with topic channels)
 
-Use when the task has **independent streams** that each need their own coordination — multiple modules, parallel analysis tracks, separate feature branches.
+Use when the task has **distinct focus areas** that benefit from sub-teams — multiple modules, parallel analysis tracks, separate feature branches.
 
 ```
 Queen (you, interactive)
-├── Coordinator A (swarm: alpha)
-│   ├── Agent a1  ←─┐
-│   └── Agent a2  ←─┴── alpha socket (structural isolation)
-└── Coordinator B (swarm: beta)
-    ├── Agent b1  ←─┐
-    └── Agent b2  ←─┴── beta socket (structural isolation)
+│
+├── general          ← cross-team coordination, everyone reads
+├── topic-frontend   ← team alpha's primary channel
+│   ├── Agent a1
+│   └── Agent a2
+└── topic-backend    ← team beta's primary channel
+    ├── Agent b1
+    └── Agent b2
 ```
 
-**Per-swarm socket isolation**: Each coordinator creates its own socket. Agents in swarm A cannot talk to agents in swarm B — they're on different buses. Coordinators talk to each other and the queen on the queen's socket.
+All agents share the same channel group. Each sub-team has a **topic channel** for their focused work, and the **general channel** is available for cross-team coordination. Agents should prefer their topic channel for day-to-day findings and use general when something affects another team.
 
 **Good for**: multi-module implementation, large analysis with distinct focus areas, separate feature branches.
 
 ## How It Works
 
-The `swarm` tool spawns agents as background processes connected via a Unix socket. You (the queen) stay interactive throughout:
+The `swarm` tool spawns agents as background processes connected via **channels** — Unix sockets with fan-out messaging. Each swarm gets a channel group with a general broadcast channel and per-agent inboxes. You (the queen) stay interactive throughout:
 
-1. **You call `swarm`** with agent definitions and an optional hive-mind path → returns immediately
+1. **You call `swarm`** with agent definitions and an optional task directory → returns immediately
 2. **Agents run in background** — you see live status in the widget and get notifications
 3. **Use `/hive`** to check detailed agent activity, or **`/hive <name>`** for a specific agent
 4. **Use `swarm_status`** for a structured status check
@@ -70,13 +72,18 @@ The `swarm` tool spawns agents as background processes connected via a Unix sock
 
 ### Agent Coordination
 
-Agents coordinate through a **hive-mind file** (shared markdown):
-- Agents use `hive_notify` to nudge teammates after updating the hive-mind
-- Agents use `hive_blocker` if stuck — this interrupts you (the queen) to help
-- Agents use `hive_done` when finished — the last thing they do
-- Agents use `edit` (never `write`) on the hive-mind to avoid overwriting each other
+Agents coordinate through two mechanisms:
 
-The socket is a **notification bell**, not a telephone. Complex state goes in the hive-mind file.
+**Channels** (real-time notifications):
+- `hive_notify` — nudge teammates after updating the hive-mind
+- `hive_blocker` — signal a blocker (interrupts the queen to help)
+- `hive_done` — signal task completion (the last thing an agent does)
+- `hive_progress` — report progress to the dashboard
+
+**Hive-mind file** (persistent shared state):
+- A shared markdown file where agents write detailed findings
+- Agents use `edit` (never `write`) on the hive-mind to avoid overwriting each other
+- Channels are the notification bell; the hive-mind is the shared memory
 
 ---
 
@@ -101,63 +108,24 @@ Determine what specialized agents would help. Common types:
 
 ### 3. Set Up Worktrees (implementation swarms only)
 
-If agents will **modify code** (not just research), create a worktree per agent (flat swarm) or per swarm (hierarchical):
+If agents will **modify code** (not just research), create a worktree per agent or per team:
 
 ```bash
-# Flat swarm: per-agent worktrees
+# Per-agent worktrees
 git worktree add ../$(basename $(pwd))-<agent-name> -b swarm/<agent-name>
 
-# Hierarchical swarm: per-swarm worktrees
-git worktree add ../$(basename $(pwd))-<swarm-name> -b feature/<swarm-name>
+# Per-team worktrees (agents on same team share a worktree)
+git worktree add ../$(basename $(pwd))-<team-name> -b feature/<team-name>
 
 # Copy project-local pi config if it exists
 [ -d .pi ] && cp -r .pi ../$(basename $(pwd))-<name>/.pi
 ```
 
-Pass each agent/coordinator its worktree path via the `cwd` field. **Research-only swarms** skip this — agents that only read and report don't need isolation.
+Pass each agent its worktree path via the `cwd` field. **Research-only swarms** skip this — agents that only read and report don't need isolation.
 
-### 4. Write Coordination File (hierarchical only)
+### 4. Launch the Swarm
 
-For hierarchical swarms, write a coordination file at `scratchpad/reports/YYYY-MM-DD-multi-<task>/coordination.md`:
-
-```markdown
----
-tags:
-  - type/swarm
----
-
-# Queen's Coordination: [Task Name]
-**Date**: YYYY-MM-DD
-
-## Objective
-[What the overall task is trying to accomplish]
-
-## Swarms
-| Swarm | Coordinator | Worktree | Status |
-|-------|-------------|----------|--------|
-| alpha | coord-alpha | /path/to/worktree | Pending |
-| beta | coord-beta | /path/to/worktree | Pending |
-
-## Agents
-| Agent | Swarm | Focus | Status |
-|-------|-------|-------|--------|
-| a1 | alpha | [focus] | Pending |
-| a2 | alpha | [focus] | Pending |
-| b1 | beta | [focus] | Pending |
-
-## Cross-Swarm Notes
-(Queen posts findings relevant across swarms as coordinators report back)
-
-## Completion Checklist
-- [ ] All coordinators complete
-- [ ] Cross-swarm synthesis written
-- [ ] Branches merged (tests pass after each)
-- [ ] Scratchpad committed
-```
-
-### 5. Launch the Swarm
-
-Call the `swarm` tool with your agent definitions. **Hive-mind path goes in the scratchpad**, not `/tmp`.
+Call the `swarm` tool with your agent definitions. **Task directory goes in the scratchpad**, not `/tmp`.
 
 **Flat swarm:**
 ```
@@ -166,44 +134,49 @@ swarm({
     { name: "agent a1", role: "agent", swarm: "alpha", task: "..." },
     { name: "agent a2", role: "agent", swarm: "alpha", task: "..." }
   ],
-  hiveMind: {
-    path: "scratchpad/reports/YYYY-MM-DD-<task>/hive-mind.md",
+  taskDir: {
+    path: "scratchpad/reports/YYYY-MM-DD-<task>/",
     overview: "Task description"
   }
 })
 ```
 
-**Hierarchical swarm:**
+**Multi-team swarm:**
 ```
 swarm({
   agents: [
-    {
-      name: "coord-alpha",
-      role: "coordinator",
-      swarm: "alpha",
-      cwd: "/path/to/worktree-alpha",
-      task: "Spawn agents a1 and a2 to work on [tasks]. Synthesize their findings. ..."
-    },
-    {
-      name: "coord-beta",
-      role: "coordinator",
-      swarm: "beta",
-      cwd: "/path/to/worktree-beta",
-      task: "Spawn agents b1 and b2 to work on [tasks]. Synthesize their findings. ..."
-    }
+    { name: "agent a1", role: "agent", swarm: "frontend", task: "..." },
+    { name: "agent a2", role: "agent", swarm: "frontend", task: "..." },
+    { name: "agent b1", role: "agent", swarm: "backend", task: "..." },
+    { name: "agent b2", role: "agent", swarm: "backend", task: "..." }
   ],
-  hiveMind: {
-    path: "scratchpad/reports/YYYY-MM-DD-multi-<task>/hive-mind.md",
+  taskDir: {
+    path: "scratchpad/reports/YYYY-MM-DD-<task>/",
     overview: "Task description"
   }
 })
 ```
+
+Agents in the same `swarm` form a sub-team. They share the general channel for cross-team visibility but should prefer their topic channel for focused work.
 
 The tool returns immediately. Monitor with:
 - **Widget** — live status in the sidebar
 - **`/hive`** — detailed activity view
 - **`swarm_status`** — structured status check
 - **`swarm_instruct`** — send instructions to a coordinator or broadcast
+
+### Task Directory Scaffolding
+
+The `swarm` tool automatically scaffolds the task directory:
+
+**Flat swarm** creates:
+```
+taskDir/
+├── hive-mind.md         (shared state, all agents read/write)
+└── <agent-name>-report.md  (per-agent, write tool OK)
+```
+
+Agents receive their file paths in their system prompt. No manual file creation needed.
 
 ---
 
@@ -244,12 +217,9 @@ The agent file's system prompt, tools, and model are used as defaults (inline pa
 ### Synthesize
 
 1. **Read the hive-mind** — it has the combined findings from all agents
-2. **Read coordinator reports** (hierarchical) or agent output (flat)
-3. **Check for trouble** — blockers, unanswered questions, conflicts between agents/swarms
-4. **Write synthesis report**:
-
-For flat swarms: `scratchpad/reports/YYYY-MM-DD-<task>/synthesis.md`
-For hierarchical swarms: `scratchpad/reports/YYYY-MM-DD-multi-<task>/cross-swarm-synthesis.md`
+2. **Read agent reports** for each agent's detailed findings
+3. **Check for trouble** — blockers, unanswered questions, conflicts between teams
+4. **Write synthesis report** at `scratchpad/reports/YYYY-MM-DD-<task>/synthesis.md`
 
 ### Merge Worktrees (if created)
 
