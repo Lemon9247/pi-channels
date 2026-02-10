@@ -1,26 +1,25 @@
 /**
  * Swarm Socket Extension
  *
- * Provides Unix socket-based coordination for multi-agent swarms.
+ * Provides channel-based coordination for multi-agent swarms.
  * Two modes based on environment:
  *
- * - No PI_SWARM_SOCKET: Queen mode. Can create swarms (socket server).
- * - PI_SWARM_SOCKET set: Agent/coordinator mode. Connects as client.
+ * - No PI_CHANNELS_GROUP: Queen mode. Can create swarms (channel groups).
+ * - PI_CHANNELS_GROUP set: Agent/coordinator mode. Connects as client.
  *
  * The swarm tool is always registered (queen starts swarms, coordinators
  * spawn sub-agents within existing swarms).
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { cleanStaleSockets } from "./transport/unix-socket.js";
-import { SwarmClient } from "./core/client.js";
-import { createIdentity, getSocketPath } from "./core/identity.js";
+import { createIdentity, getChannelGroupPath, getInboxChannel, getSubscribeChannels } from "./core/identity.js";
+import { connectToMultiple } from "./core/channels.js";
 import { registerSwarmTool } from "./tools/swarm.js";
 import { registerInstructTool } from "./tools/instruct.js";
 import { registerStatusTool } from "./tools/status.js";
 import { registerAgentTools } from "./tools/agent.js";
 import { setupNotifications } from "./ui/notifications.js";
-import { cleanupSwarm, setParentClient, getParentClient } from "./core/state.js";
+import { cleanupSwarm, setParentClients, getParentClients } from "./core/state.js";
 import { registerMessageRenderers } from "./ui/renderers.js";
 import { clearDashboard } from "./ui/dashboard.js";
 import { registerSwarmCommand } from "./ui/commands.js";
@@ -29,43 +28,41 @@ export default function (pi: ExtensionAPI) {
     // Initialize identity from environment variables
     const identity = createIdentity();
 
-    // Clean stale sockets on startup (queen mode only)
-    const socketPath = getSocketPath();
-    if (!socketPath) {
-        cleanStaleSockets();
-    }
+    const channelGroupPath = getChannelGroupPath();
 
-    if (socketPath && identity.role !== "queen") {
-        // We're inside a swarm — connect as client
-        const client = new SwarmClient({
-            name: identity.name,
-            role: identity.role,
-            swarm: identity.swarm,
-        });
+    if (channelGroupPath && identity.role !== "queen") {
+        // We're inside a swarm — connect to channels on session start
+        const inboxChannel = getInboxChannel();
+        const subscribeChannels = getSubscribeChannels();
 
-        // Store as parent client so coordinator can relay through it
-        setParentClient(client);
+        // Build list of channels to connect to
+        const channelNames: string[] = [];
+        if (inboxChannel) channelNames.push(inboxChannel);
+        for (const ch of subscribeChannels) {
+            if (!channelNames.includes(ch)) channelNames.push(ch);
+        }
 
-        // Connect on session start
         pi.on("session_start", async (_event, ctx) => {
             try {
-                await client.connect(socketPath);
+                const clients = await connectToMultiple(channelGroupPath, channelNames);
+                setParentClients(clients);
+
+                // Set up incoming message handler
+                setupNotifications(pi, clients);
+
                 if (ctx.hasUI) {
                     ctx.ui.setStatus("swarm", `🐝 ${identity.name} (${identity.role})`);
                 }
             } catch (err) {
-                // Socket connection failed — agent runs without coordination
+                // Channel connection failed — agent runs without coordination
                 if (ctx.hasUI) {
-                    ctx.ui.notify(`Swarm socket connection failed: ${err}`, "warning");
+                    ctx.ui.notify(`Channel connection failed: ${err}`, "warning");
                 }
             }
         });
 
         // Register agent notification tools
-        registerAgentTools(pi, client);
-
-        // Set up incoming message handler
-        setupNotifications(pi, client);
+        registerAgentTools(pi);
     }
 
     // Register message renderers for all swarm notification types
@@ -75,7 +72,7 @@ export default function (pi: ExtensionAPI) {
     registerSwarmCommand(pi);
 
     // Register management tools based on role:
-    // - Queen (no PI_SWARM_SOCKET): gets swarm + instruct + status
+    // - Queen (no PI_CHANNELS_GROUP): gets swarm + instruct + status
     // - Coordinator: gets swarm + instruct + status (can spawn sub-agents)
     // - Agent: gets NONE of these (agents do work, they don't delegate)
     if (identity.role === "queen" || identity.role === "coordinator") {
@@ -85,14 +82,18 @@ export default function (pi: ExtensionAPI) {
     }
 
     // Single shutdown handler with correct ordering:
-    // 1. Clean up own swarm first (kills sub-agents, relays disconnections up)
-    // 2. Then disconnect from parent socket
+    // 1. Clean up own swarm first (kills sub-agents)
+    // 2. Then disconnect from parent channels
     pi.on("session_shutdown", async () => {
         clearDashboard(true);
         await cleanupSwarm();
-        if (socketPath && identity.role !== "queen") {
-            const pc = getParentClient();
-            if (pc) pc.disconnect();
+        // Disconnect parent channel clients
+        const clients = getParentClients();
+        if (clients) {
+            for (const client of clients.values()) {
+                try { client.disconnect(); } catch { /* ignore */ }
+            }
+            setParentClients(null);
         }
     });
 }
