@@ -52,16 +52,23 @@ export default function (pi: ExtensionAPI) {
                 setupNotifications(pi, clients);
 
                 // Send registration message so queen knows we're running
+                // Send to both QUEEN_INBOX (primary) and GENERAL (fallback)
+                // — same pattern as hive_done/hive_blocker/hive_progress
+                const registerMsg = {
+                    msg: "register",
+                    data: {
+                        type: "register",
+                        from: identity.name,
+                        role: identity.role,
+                    },
+                };
+                const queenClient = clients.get(QUEEN_INBOX);
+                if (queenClient?.connected) {
+                    queenClient.send(registerMsg);
+                }
                 const generalClient = clients.get(GENERAL_CHANNEL);
                 if (generalClient?.connected) {
-                    generalClient.send({
-                        msg: "register",
-                        data: {
-                            type: "register",
-                            from: identity.name,
-                            role: identity.role,
-                        },
-                    });
+                    generalClient.send(registerMsg);
                 }
 
                 if (ctx.hasUI) {
