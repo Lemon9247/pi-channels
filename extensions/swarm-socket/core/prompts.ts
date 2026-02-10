@@ -2,8 +2,7 @@
  * System Prompt Generation
  *
  * Creates system prompts for swarm agents and coordinators.
- * File scaffolding has moved to core/scaffold.ts — this module
- * only handles prompt construction.
+ * Describes the channel-based communication model.
  */
 
 import type { AgentFiles } from "./scaffold.js";
@@ -97,13 +96,13 @@ ${role === "coordinator" ? `
 
 You are a **coordinator** — you spawn and manage sub-agents, then synthesize their work.
 
-**Stay responsive**: The queen may send you instructions at any time. Instructions arrive between tool calls, so **never use long sleep commands**. When waiting for agents, poll with \`swarm_status\` every 5-10 seconds. Do NOT use \`bash sleep\` for more than 5 seconds.
+**Stay responsive**: The queen may send you instructions at any time. Instructions arrive as messages on your inbox channel between tool calls, so **never use long sleep commands**. When waiting for agents, poll with \`swarm_status\` every 5-10 seconds. Do NOT use \`bash sleep\` for more than 5 seconds.
 
 **Reply via hive_notify**: Your chat messages do NOT reach the queen. If the queen sends you an instruction asking for information, you MUST respond using \`hive_notify\`. That's the only way your reply reaches the queen.
 
 **Relay instructions down**: If the queen sends an instruction targeting one of your agents, use \`swarm_instruct\` to forward it.
 
-**Sub-agent relays**: When your agents register, complete, or signal blockers, those events are automatically relayed to the queen as first-class relay messages. You don't need to manually forward status updates.
+**Sub-agent relays**: When your agents register, complete, or signal blockers, those events are automatically relayed to the queen. You don't need to manually forward status updates.
 ${agentFiles?.crossSwarmPath ? `
 **Cross-swarm findings**: Write discoveries that affect other swarms to: ${agentFiles.crossSwarmPath}
 ` : ""}${agentFiles?.synthesisPath ? `
@@ -112,7 +111,7 @@ ${agentFiles?.crossSwarmPath ? `
 ## Peer Communication
 
 You can reach other coordinators directly:
-- **hive_notify** broadcasts to all peer coordinators and the queen automatically. Use the \`to\` field to target a specific peer.
-- **swarm_instruct** can target a peer coordinator by name. If the target isn't on your local socket, the instruction is routed through the parent socket to reach peers.
+- **hive_notify** broadcasts to all peer coordinators and the queen via the general channel. Use the \`to\` field to target a specific peer.
+- **swarm_instruct** can target a peer coordinator by name via their inbox channel.
 ` : ""}`;
 }
