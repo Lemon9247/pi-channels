@@ -3,6 +3,12 @@
  *
  * Handles spawning pi agent processes with correct environment variables,
  * system prompts, and process configuration.
+ *
+ * Agents receive channel configuration via environment variables:
+ * - PI_CHANNELS_GROUP: path to the channel group directory
+ * - PI_CHANNELS_INBOX: this agent's inbox channel name
+ * - PI_CHANNELS_SUBSCRIBE: comma-separated channels to read
+ * - PI_CHANNELS_NAME: agent display name
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
@@ -12,6 +18,7 @@ import * as path from "node:path";
 import { createSwarmSystemPrompt } from "./prompts.js";
 import { type AgentConfig } from "./agents.js";
 import type { AgentFiles } from "./scaffold.js";
+import { ENV, inboxName, GENERAL_CHANNEL } from "./channels.js";
 
 export function writePromptToTempFile(name: string, prompt: string): { dir: string; filePath: string } {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-swarm-"));
@@ -33,10 +40,9 @@ export function spawnAgent(
         model?: string;
         cwd?: string;
     },
-    socketPath: string,
+    channelGroupPath: string,
     taskDirPath: string | undefined,
     defaultCwd: string,
-    code: string,
     knownAgents?: Map<string, AgentConfig>,
     agentFiles?: AgentFiles,
 ): { process: ChildProcess; tmpDir?: string } {
@@ -84,14 +90,19 @@ export function spawnAgent(
     // Task as the prompt
     args.push(`Task: ${agentDef.task}`);
 
-    // Environment variables for socket connection
+    // Environment variables for channel connection
+    const inbox = inboxName(agentDef.name);
     const env: Record<string, string | undefined> = {
         ...process.env,
-        PI_SWARM_SOCKET: socketPath,
+        // Channel configuration
+        [ENV.GROUP]: channelGroupPath,
+        [ENV.INBOX]: inbox,
+        [ENV.SUBSCRIBE]: GENERAL_CHANNEL,
+        [ENV.NAME]: agentDef.name,
+        // Legacy/role info (still useful for identity)
         PI_SWARM_AGENT_NAME: agentDef.name,
         PI_SWARM_AGENT_ROLE: agentDef.role,
         PI_SWARM_AGENT_SWARM: agentDef.swarm,
-        PI_SWARM_CODE: code,
     };
 
     // Pass task dir to coordinators so they can scaffold subdirectories
