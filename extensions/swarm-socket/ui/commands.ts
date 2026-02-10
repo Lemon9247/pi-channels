@@ -11,9 +11,10 @@
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { getSwarmState, type AgentInfo, type AgentStatus, cleanupSwarm, gracefulShutdown } from "../core/state.js";
-import { getIdentity, buildChildrenMap } from "../core/identity.js";
 import { getAgentActivity, clearActivity, type ActivityEvent } from "./activity.js";
 import { clearDashboard } from "./dashboard.js";
+import { GENERAL_CHANNEL } from "../core/channels.js";
+import { getIdentity } from "../core/identity.js";
 
 function statusIcon(status: AgentStatus): string {
     switch (status) {
@@ -107,8 +108,8 @@ export function registerSwarmCommand(pi: ExtensionAPI): void {
                 return;
             }
 
-            if (!state.server) {
-                ctx.ui.notify("Cannot graceful-stop: no server (coordinator swarms must be stopped by their queen).", "warning");
+            if (!state.group) {
+                ctx.ui.notify("Cannot graceful-stop: no channel group (coordinator swarms must be stopped by their queen).", "warning");
                 return;
             }
 
@@ -116,14 +117,23 @@ export function registerSwarmCommand(pi: ExtensionAPI): void {
 
             const identity = getIdentity();
             const sendInstruct = (instruction: string) => {
-                state.server!.broadcastInstruct(instruction, {
-                    name: identity.name,
-                    role: identity.role,
-                    swarm: identity.swarm,
-                });
+                // Broadcast shutdown instruction via general channel
+                const generalClient = state.queenClients.get(GENERAL_CHANNEL);
+                if (generalClient?.connected) {
+                    try {
+                        generalClient.send({
+                            msg: instruction,
+                            data: {
+                                type: "instruct",
+                                from: identity.name,
+                                instruction,
+                            },
+                        });
+                    } catch { /* ignore */ }
+                }
             };
 
-            await gracefulShutdown(state.server, sendInstruct);
+            await gracefulShutdown(sendInstruct);
             clearActivity();
             clearDashboard(true);
 
@@ -151,44 +161,43 @@ function printOverview(pi: ExtensionAPI, state: ReturnType<typeof getSwarmState>
     }
     text += "\n";
 
-    // Build tree from hierarchical codes
-    const myCode = getIdentity().code;
-    const { children } = buildChildrenMap(agents);
+    // Group agents by swarm for display
+    const bySwarm = new Map<string, AgentInfo[]>();
+    for (const agent of agents) {
+        if (!bySwarm.has(agent.swarm)) bySwarm.set(agent.swarm, []);
+        bySwarm.get(agent.swarm)!.push(agent);
+    }
 
-    // Recursive tree render
-    function renderTree(code: string, indent: string): void {
-        const kids = children.get(code) || [];
-        for (const agent of kids) {
+    for (const [swarmName, swarmAgents] of bySwarm) {
+        if (bySwarm.size > 1) {
+            text += `### ${swarmName}\n`;
+        }
+
+        for (const agent of swarmAgents) {
             const icon = statusIcon(agent.status);
             const role = agent.role === "coordinator" ? "coord" : "agent";
-            const codeTag = `\`${agent.code}\``;
 
-            text += `${indent}${icon} **${agent.name}** ${codeTag} (${role}) — ${agent.status}`;
+            text += `${icon} **${agent.name}** (${role}) — ${agent.status}`;
 
             if (agent.doneSummary) {
-                text += `\n${indent}  ${agent.doneSummary}`;
+                text += `\n  ${agent.doneSummary}`;
             } else if (agent.blockerDescription) {
-                text += `\n${indent}  ⚠ ${agent.blockerDescription}`;
+                text += `\n  ⚠ ${agent.blockerDescription}`;
             }
 
             // Last 3 activity events as preview
             const activity = getAgentActivity(agent.name);
             if (activity.length > 0) {
                 const recent = activity.slice(-3);
-                text += `\n${indent}  Recent:`;
+                text += `\n  Recent:`;
                 for (const ev of recent) {
-                    text += `\n${indent}    ${eventIcon(ev.type)} ${ev.summary}`;
+                    text += `\n    ${eventIcon(ev.type)} ${ev.summary}`;
                 }
             }
 
             text += "\n\n";
-
-            // Recurse into children
-            renderTree(agent.code, indent + "  ");
         }
     }
-
-    renderTree(myCode, "");
 
     text += `_Use \`/hive <name>\` to see full activity for an agent._`;
 
@@ -201,7 +210,7 @@ function printOverview(pi: ExtensionAPI, state: ReturnType<typeof getSwarmState>
 
 function printAgentDetail(pi: ExtensionAPI, agent: AgentInfo): void {
     const icon = statusIcon(agent.status);
-    let text = `**${icon} ${agent.name}** \`${agent.code}\` (${agent.role}, ${agent.swarm}) — ${agent.status}\n`;
+    let text = `**${icon} ${agent.name}** (${agent.role}, ${agent.swarm}) — ${agent.status}\n`;
 
     if (agent.doneSummary) {
         text += `✓ ${agent.doneSummary}\n`;
