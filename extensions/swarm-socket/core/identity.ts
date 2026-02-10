@@ -1,18 +1,19 @@
 /**
  * Identity
  *
- * Single source of truth for "who am I" in the swarm hierarchy.
+ * Single source of truth for "who am I" in the swarm.
  * Constructed once from environment variables at startup.
- * Also provides hierarchy helpers for working with positional codes.
+ * Simplified for channel-based architecture — no hierarchical codes.
  */
 
-import type { Role } from "../transport/protocol.js";
+import { ENV } from "./channels.js";
+
+export type Role = "queen" | "coordinator" | "agent";
 
 export interface Identity {
     name: string;
     role: Role;
     swarm?: string;
-    code: string;
 }
 
 // Module-level singleton
@@ -30,10 +31,9 @@ export function createIdentity(): Identity {
     if (_identity) return _identity;
 
     _identity = {
-        name: process.env.PI_SWARM_AGENT_NAME || "queen",
+        name: process.env[ENV.NAME] || process.env.PI_SWARM_AGENT_NAME || "queen",
         role: (process.env.PI_SWARM_AGENT_ROLE as Role) || "queen",
         swarm: process.env.PI_SWARM_AGENT_SWARM,
-        code: process.env.PI_SWARM_CODE || "0",
     };
     return _identity;
 }
@@ -47,11 +47,29 @@ export function getIdentity(): Identity {
 }
 
 /**
- * Get the socket path from environment. Returns undefined if not in a swarm.
- * Centralizes PI_SWARM_SOCKET access so no other file reads it directly.
+ * Get the channel group path from environment.
+ * Returns undefined if not in a swarm (queen mode).
  */
-export function getSocketPath(): string | undefined {
-    return process.env.PI_SWARM_SOCKET || undefined;
+export function getChannelGroupPath(): string | undefined {
+    return process.env[ENV.GROUP] || undefined;
+}
+
+/**
+ * Get the inbox channel name from environment.
+ * Returns undefined if not in a swarm.
+ */
+export function getInboxChannel(): string | undefined {
+    return process.env[ENV.INBOX] || undefined;
+}
+
+/**
+ * Get the channels this agent should subscribe to (read from).
+ * Returns array of channel names, defaults to ["general"].
+ */
+export function getSubscribeChannels(): string[] {
+    const raw = process.env[ENV.SUBSCRIBE];
+    if (!raw) return ["general"];
+    return raw.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
 /**
@@ -61,41 +79,4 @@ export function getSocketPath(): string | undefined {
  */
 export function resetIdentity(): void {
     _identity = null;
-}
-
-// === Hierarchy Helpers ===
-
-/** Derive level from code: "0.1.2" → 2 (count the dots) */
-export function codeLevel(code: string): number {
-    return code.split(".").length - 1;
-}
-
-/** Derive parent code: "0.1.2" → "0.1", "0.1" → "0" */
-export function parentCode(code: string): string {
-    const parts = code.split(".");
-    return parts.slice(0, -1).join(".");
-}
-
-/** Check if code is a descendant of another: "0.1.2" is under "0.1" */
-export function isDescendantOf(code: string, ancestor: string): boolean {
-    return code.startsWith(ancestor + ".");
-}
-
-/**
- * Build a children lookup from a list of items with codes, grouped by parent code.
- * Returns a map of parentCode → sorted children.
- */
-export function buildChildrenMap<T extends { code: string }>(
-    agents: T[],
-): { sorted: T[]; children: Map<string, T[]> } {
-    const sorted = agents.slice().sort((a, b) =>
-        a.code.localeCompare(b.code, undefined, { numeric: true }),
-    );
-    const children = new Map<string, T[]>();
-    for (const agent of sorted) {
-        const pc = parentCode(agent.code);
-        if (!children.has(pc)) children.set(pc, []);
-        children.get(pc)!.push(agent);
-    }
-    return { sorted, children };
 }
