@@ -28,7 +28,11 @@ describe("instruct messaging", () => {
     });
 
     it("sends targeted instruction to specific agent inbox", async () => {
-        group = await createSwarmChannelGroup("instruct-test", ["a1", "a2"]);
+        const result = await createSwarmChannelGroup("instruct-test", [
+            { name: "a1", swarm: "test" },
+            { name: "a2", swarm: "test" },
+        ]);
+        group = result.group;
 
         // Queen connects to all inboxes (simulating swarm.ts behavior)
         const queenClients = await connectToMultiple(group.path, [

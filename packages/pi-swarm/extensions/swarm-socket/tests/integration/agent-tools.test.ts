@@ -15,6 +15,7 @@ import {
     GENERAL_CHANNEL,
     QUEEN_INBOX,
     inboxName,
+    type SwarmAgent,
 } from "../../core/channels.js";
 import { setParentClients, cleanupSwarm } from "../../core/state.js";
 import { resetIdentity } from "../../core/identity.js";
@@ -46,7 +47,11 @@ describe("agent tools messaging", () => {
         resetIdentity();
 
         // Create channel group
-        group = await createSwarmChannelGroup("agent-tools-test", ["agent a1", "agent a2"]);
+        const result = await createSwarmChannelGroup("agent-tools-test", [
+            { name: "agent a1", swarm: "test" },
+            { name: "agent a2", swarm: "test" },
+        ]);
+        group = result.group;
 
         // Queen monitors queen inbox and general
         queenMonitor = await connectToMultiple(group.path, [QUEEN_INBOX, GENERAL_CHANNEL]);

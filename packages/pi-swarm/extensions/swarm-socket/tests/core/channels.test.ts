@@ -14,11 +14,18 @@ import {
     connectToChannel,
     connectToMultiple,
     inboxName,
+    topicName,
     groupPath,
     GENERAL_CHANNEL,
     QUEEN_INBOX,
     SWARM_BASE_DIR,
+    type SwarmAgent,
 } from "../../core/channels.js";
+
+/** Helper: convert agent names to SwarmAgent[] (all in same swarm). */
+function agents(names: string[], swarm = "default"): SwarmAgent[] {
+    return names.map((name) => ({ name, swarm }));
+}
 
 describe("channels", () => {
     const cleanupGroups: ChannelGroup[] = [];
@@ -56,7 +63,7 @@ describe("channels", () => {
 
     describe("createSwarmChannelGroup", () => {
         it("creates group with general + queen inbox + agent inboxes", async () => {
-            const group = await createSwarmChannelGroup("test-create", ["agent a1", "agent a2"]);
+            const { group } = await createSwarmChannelGroup("test-create", agents(["agent a1", "agent a2"]));
             cleanupGroups.push(group);
 
             assert.equal(group.started, true);
@@ -70,7 +77,7 @@ describe("channels", () => {
         });
 
         it("creates group.json metadata", async () => {
-            const group = await createSwarmChannelGroup("test-meta", ["scout"]);
+            const { group } = await createSwarmChannelGroup("test-meta", agents(["scout"]));
             cleanupGroups.push(group);
 
             const metaPath = path.join(group.path, "group.json");
@@ -81,7 +88,7 @@ describe("channels", () => {
         });
 
         it("creates socket files", async () => {
-            const group = await createSwarmChannelGroup("test-sockets", ["a1"]);
+            const { group } = await createSwarmChannelGroup("test-sockets", agents(["a1"]));
             cleanupGroups.push(group);
 
             const generalSock = path.join(group.path, "general.sock");
@@ -92,11 +99,52 @@ describe("channels", () => {
             assert.ok(fs.existsSync(queenSock), "inbox-queen.sock should exist");
             assert.ok(fs.existsSync(a1Sock), "inbox-a1.sock should exist");
         });
+
+        it("does not create topic channels for single swarm", async () => {
+            const { group, topicChannels } = await createSwarmChannelGroup(
+                "test-single-swarm",
+                agents(["a1", "a2"], "alpha"),
+            );
+            cleanupGroups.push(group);
+
+            assert.equal(topicChannels.size, 0, "single swarm should not create topic channels");
+            assert.ok(!group.list().some((n) => n.startsWith("topic-")));
+        });
+
+        it("creates topic channels for multiple swarms", async () => {
+            const multiAgents: SwarmAgent[] = [
+                { name: "a1", swarm: "frontend" },
+                { name: "a2", swarm: "frontend" },
+                { name: "b1", swarm: "backend" },
+            ];
+            const { group, topicChannels } = await createSwarmChannelGroup("test-multi-swarm", multiAgents);
+            cleanupGroups.push(group);
+
+            assert.equal(topicChannels.size, 2);
+            assert.equal(topicChannels.get("frontend"), "topic-frontend");
+            assert.equal(topicChannels.get("backend"), "topic-backend");
+
+            const channels = group.list();
+            assert.ok(channels.includes("topic-frontend"), "should have frontend topic");
+            assert.ok(channels.includes("topic-backend"), "should have backend topic");
+            // general + queen + 3 inboxes + 2 topics = 7
+            assert.equal(channels.length, 7);
+        });
+    });
+
+    describe("topicName", () => {
+        it("creates topic name from swarm name", () => {
+            assert.equal(topicName("frontend"), "topic-frontend");
+        });
+
+        it("sanitizes special characters", () => {
+            assert.equal(topicName("my team/alpha"), "topic-my-team-alpha");
+        });
     });
 
     describe("connectToChannel", () => {
         it("connects a client to a channel", async () => {
-            const group = await createSwarmChannelGroup("test-connect", ["a1"]);
+            const { group } = await createSwarmChannelGroup("test-connect", agents(["a1"]));
             cleanupGroups.push(group);
 
             const client = await connectToChannel(group.path, GENERAL_CHANNEL);
@@ -108,7 +156,7 @@ describe("channels", () => {
 
     describe("connectToMultiple", () => {
         it("connects to multiple channels at once", async () => {
-            const group = await createSwarmChannelGroup("test-multi", ["a1", "a2"]);
+            const { group } = await createSwarmChannelGroup("test-multi", agents(["a1", "a2"]));
             cleanupGroups.push(group);
 
             const clients = await connectToMultiple(group.path, [GENERAL_CHANNEL, "inbox-a1"]);
@@ -122,7 +170,7 @@ describe("channels", () => {
 
     describe("cleanup", () => {
         it("group.stop removes directory when removeDir is true", async () => {
-            const group = await createSwarmChannelGroup("test-cleanup", ["a1"]);
+            const { group } = await createSwarmChannelGroup("test-cleanup", agents(["a1"]));
             const dirPath = group.path;
 
             assert.ok(fs.existsSync(dirPath));

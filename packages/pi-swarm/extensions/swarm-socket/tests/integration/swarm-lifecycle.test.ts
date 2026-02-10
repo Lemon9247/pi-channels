@@ -32,7 +32,10 @@ describe("swarm lifecycle", () => {
 
     it("creates group → connects queen → connects agents → sends messages → cleans up", async () => {
         // 1. Create channel group
-        const group = await createSwarmChannelGroup("lifecycle-test", ["a1", "a2"]);
+        const { group } = await createSwarmChannelGroup("lifecycle-test", [
+            { name: "a1", swarm: "test" },
+            { name: "a2", swarm: "test" },
+        ]);
         cleanupGroups.push(group);
 
         assert.equal(group.started, true);

@@ -114,22 +114,22 @@ describe("prompt builder", () => {
             swarmAgents: ["agent a1"],
         });
 
-        assert.ok(!prompt.includes("# Coordinator"), "agent prompt should not include coordinator role");
+        assert.ok(!prompt.includes("# Team Lead"), "agent prompt should not include team lead role");
         // Agent prompt should not include coordinator tool docs (## swarm_instruct heading)
         // but may mention swarm_instruct in pattern files (agents receive instructions)
         assert.ok(!prompt.includes("## swarm_instruct"), "agent prompt should not include swarm_instruct tool doc");
         assert.ok(!prompt.includes("## swarm_status"), "agent prompt should not include swarm_status tool doc");
     });
 
-    it("builds coordinator prompt with coordinator sections", () => {
+    it("builds coordinator prompt with team lead sections", () => {
         const prompt = buildSystemPrompt({
             role: "coordinator",
             agentName: "coord-alpha",
             swarmAgents: ["coord-alpha", "agent a1"],
         });
 
-        // Has coordinator role content
-        assert.ok(prompt.includes("Coordinator"), "should include coordinator role");
+        // Has team lead role content
+        assert.ok(prompt.includes("Team Lead"), "should include team lead role");
         assert.ok(prompt.includes("swarm_instruct"), "should include swarm_instruct tool doc");
         assert.ok(prompt.includes("swarm_status"), "should include swarm_status tool doc");
 
@@ -225,6 +225,30 @@ describe("prompt builder", () => {
         });
 
         assert.ok(prompt.includes("---"), "sections should be separated by dividers");
+    });
+
+    it("includes topic channel in channel list when provided", () => {
+        const prompt = buildSystemPrompt({
+            role: "agent",
+            agentName: "agent a1",
+            swarmAgents: ["agent a1", "agent b1"],
+            topicChannel: "topic-frontend",
+        });
+
+        assert.ok(prompt.includes("`topic-frontend`"), "should contain topic channel name");
+        assert.ok(prompt.includes("Your Team"), "should label it as team channel");
+        assert.ok(prompt.includes("cross-team"), "general should mention cross-team use");
+    });
+
+    it("omits topic channel when not provided", () => {
+        const prompt = buildSystemPrompt({
+            role: "agent",
+            agentName: "agent a1",
+            swarmAgents: ["agent a1"],
+        });
+
+        assert.ok(!prompt.includes("Your Team"), "should not have team channel section");
+        assert.ok(!prompt.includes("topic-"), "should not reference any topic channel");
     });
 
     it("does not reference old concepts", () => {

@@ -16,7 +16,7 @@ import { Type } from "@sinclair/typebox";
 import type { ChannelClient, Message } from "../../../../agent-channels/dist/index.js";
 import { getParentClients } from "../core/state.js";
 import { getIdentity } from "../core/identity.js";
-import { GENERAL_CHANNEL, QUEEN_INBOX, inboxName } from "../core/channels.js";
+import { GENERAL_CHANNEL, QUEEN_INBOX, ENV, inboxName } from "../core/channels.js";
 
 /**
  * Get a connected ChannelClient by channel name from parent clients.
@@ -120,6 +120,7 @@ export function registerAgentTools(pi: ExtensionAPI): void {
     });
 
     // === hive_notify ===
+    const topicChannel = process.env[ENV.TOPIC] || "";
     pi.registerTool({
         name: "hive_notify",
         label: "Hive Notify",
@@ -128,13 +129,19 @@ export function registerAgentTools(pi: ExtensionAPI): void {
             "Call this AFTER updating the hive-mind with your findings. " +
             "The reason should be a short label — put details in the hive-mind file. " +
             "Optional payload fields add context so recipients can triage without file I/O. " +
-            "Optional 'to' field sends only to a specific agent by name.",
+            "Optional 'to' field sends only to a specific agent by name." +
+            (topicChannel
+                ? " Defaults to your team channel. Set broadcast=true to send to general instead."
+                : ""),
         parameters: Type.Object({
             reason: Type.String({
                 description: "Brief description of what you added to the hive-mind",
             }),
             to: Type.Optional(Type.String({
                 description: "Send only to a specific agent by name (omit to broadcast)",
+            })),
+            broadcast: Type.Optional(Type.Boolean({
+                description: "Send to general channel instead of team channel (for cross-team announcements)",
             })),
             file: Type.Optional(Type.String({
                 description: "File path that was updated",
@@ -174,6 +181,9 @@ export function registerAgentTools(pi: ExtensionAPI): void {
                 const sentInbox = sendToChannel(inboxName(params.to), msg);
                 const sentGeneral = sendToChannel(GENERAL_CHANNEL, msg);
                 sent = sentInbox || sentGeneral;
+            } else if (topicChannel && !params.broadcast) {
+                // Team-scoped: send to topic channel (queen monitors it too)
+                sent = sendToChannel(topicChannel, msg);
             } else {
                 // Broadcast: send to general
                 sent = sendToChannel(GENERAL_CHANNEL, msg);
@@ -187,7 +197,7 @@ export function registerAgentTools(pi: ExtensionAPI): void {
                 };
             }
 
-            const target = params.to ? ` → ${params.to}` : "";
+            const target = params.to ? ` → ${params.to}` : topicChannel && !params.broadcast ? ` [${topicChannel}]` : "";
             return {
                 content: [{ type: "text", text: `Nudge sent${target}: "${params.reason}"` }],
                 details: {},

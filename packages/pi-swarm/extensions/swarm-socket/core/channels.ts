@@ -17,6 +17,9 @@ export const SWARM_BASE_DIR = "/tmp/pi-swarm";
 export const GENERAL_CHANNEL = "general";
 export const QUEEN_INBOX = "inbox-queen";
 
+/** Prefix for topic channels. */
+export const TOPIC_PREFIX = "topic-";
+
 /** Environment variable names for channel configuration. */
 export const ENV = {
     /** Path to the channel group directory. */
@@ -27,6 +30,8 @@ export const ENV = {
     SUBSCRIBE: "PI_CHANNELS_SUBSCRIBE",
     /** This agent's display name. */
     NAME: "PI_CHANNELS_NAME",
+    /** This agent's topic channel name (if in a multi-team swarm). */
+    TOPIC: "PI_CHANNELS_TOPIC",
 } as const;
 
 // ─── Channel Name Helpers ────────────────────────────────────────────
@@ -38,12 +43,23 @@ export function inboxName(agentName: string): string {
     return `inbox-${safe}`;
 }
 
+/** Build a topic channel name for a swarm/team. */
+export function topicName(swarmName: string): string {
+    const safe = swarmName.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase();
+    return `${TOPIC_PREFIX}${safe}`;
+}
+
 /** Build the group directory path for a swarm. */
 export function groupPath(swarmId: string): string {
     return path.join(SWARM_BASE_DIR, swarmId);
 }
 
 // ─── Channel Group Creation ──────────────────────────────────────────
+
+export interface SwarmAgent {
+    name: string;
+    swarm: string;
+}
 
 /**
  * Create a channel group for a swarm.
@@ -52,15 +68,16 @@ export function groupPath(swarmId: string): string {
  * - `general` — broadcast channel for all agents
  * - `inbox-queen` — queen's inbox for done/blocker/progress messages
  * - `inbox-<name>` — one per agent, for targeted instructions
+ * - `topic-<swarm>` — one per unique swarm (only when 2+ swarms exist)
  *
  * @param swarmId Unique swarm identifier (used for directory name)
- * @param agentNames Names of all agents in the swarm
- * @returns Started ChannelGroup
+ * @param agents Agent names and their swarm assignments
+ * @returns Started ChannelGroup and the set of topic channel names created
  */
 export async function createSwarmChannelGroup(
     swarmId: string,
-    agentNames: string[],
-): Promise<ChannelGroup> {
+    agents: SwarmAgent[],
+): Promise<{ group: ChannelGroup; topicChannels: Map<string, string> }> {
     const dirPath = groupPath(swarmId);
 
     const channels: GroupChannelDef[] = [
@@ -68,8 +85,19 @@ export async function createSwarmChannelGroup(
         { name: QUEEN_INBOX },
     ];
 
-    for (const name of agentNames) {
-        channels.push({ name: inboxName(name) });
+    for (const agent of agents) {
+        channels.push({ name: inboxName(agent.name) });
+    }
+
+    // Create topic channels when there are multiple distinct swarms
+    const swarmNames = new Set(agents.map((a) => a.swarm));
+    const topicChannels = new Map<string, string>(); // swarm name → channel name
+    if (swarmNames.size > 1) {
+        for (const swarm of swarmNames) {
+            const topic = topicName(swarm);
+            channels.push({ name: topic });
+            topicChannels.set(swarm, topic);
+        }
     }
 
     const group = new ChannelGroup({
@@ -78,7 +106,7 @@ export async function createSwarmChannelGroup(
     });
 
     await group.start();
-    return group;
+    return { group, topicChannels };
 }
 
 // ─── Client Connection Helpers ───────────────────────────────────────

@@ -36,6 +36,7 @@ export interface PromptOptions {
     agentName: string;
     swarmAgents: string[];       // all agent names in the swarm
     agentFiles?: AgentFiles;
+    topicChannel?: string;       // topic channel name (multi-team swarms only)
 }
 
 // ─── Prompt Loading ──────────────────────────────────────────────────
@@ -92,7 +93,7 @@ export function clearPromptCache(): void {
 /**
  * Generate the "Your Channels" section for an agent's prompt.
  */
-function generateChannelList(agentName: string, swarmAgents: string[]): string {
+function generateChannelList(agentName: string, swarmAgents: string[], topicChannel?: string): string {
     const myInbox = inboxName(agentName);
     const others = swarmAgents
         .filter((n) => n !== agentName)
@@ -101,10 +102,14 @@ function generateChannelList(agentName: string, swarmAgents: string[]): string {
 
     const lines = [
         "## Your Channels\n",
-        `- **General** (\`${GENERAL_CHANNEL}\`): Broadcast — all agents and the queen read this.`,
-        `- **Your Inbox** (\`${myInbox}\`): Only you read this. The queen and other agents can write here.`,
-        `- **Queen Inbox** (\`${QUEEN_INBOX}\`): Send completion signals, blockers, and progress here.`,
     ];
+
+    if (topicChannel) {
+        lines.push(`- **Your Team** (\`${topicChannel}\`): Your sub-team's channel. Prefer this for findings and coordination within your team.`);
+    }
+    lines.push(`- **General** (\`${GENERAL_CHANNEL}\`): Broadcast — all agents and the queen read this.${topicChannel ? " Use for cross-team announcements." : ""}`);
+    lines.push(`- **Your Inbox** (\`${myInbox}\`): Only you read this. The queen and other agents can write here.`);
+    lines.push(`- **Queen Inbox** (\`${QUEEN_INBOX}\`): Send completion signals, blockers, and progress here.`);
 
     if (others) {
         lines.push(`- **Other Agents**: ${others}`);
@@ -183,11 +188,11 @@ const COORDINATOR_TOOLS = [...AGENT_TOOLS, "swarm-instruct", "swarm-status"];
  */
 export function buildSystemPrompt(options: PromptOptions): string {
     const store = loadPrompts();
-    const { role, agentName, swarmAgents, agentFiles } = options;
+    const { role, agentName, swarmAgents, agentFiles, topicChannel } = options;
 
     const vars: Record<string, string> = {
         agentName,
-        channels: generateChannelList(agentName, swarmAgents),
+        channels: generateChannelList(agentName, swarmAgents, topicChannel),
         files: generateFileSection(agentFiles),
         coordinatorFiles: generateCoordinatorFiles(agentFiles),
     };

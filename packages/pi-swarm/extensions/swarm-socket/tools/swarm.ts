@@ -19,6 +19,7 @@ import {
     GENERAL_CHANNEL,
     QUEEN_INBOX,
     inboxName,
+    topicName,
 } from "../core/channels.js";
 import {
     type AgentInfo,
@@ -312,9 +313,13 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
             // Create channel group
             const swarmId = generateSwarmId();
             const agentNames = params.agents.map((a) => a.name);
+            const swarmAgents = params.agents.map((a) => ({ name: a.name, swarm: a.swarm }));
             let group;
+            let topicChannels: Map<string, string>;
             try {
-                group = await createSwarmChannelGroup(swarmId, agentNames);
+                const result = await createSwarmChannelGroup(swarmId, swarmAgents);
+                group = result.group;
+                topicChannels = result.topicChannels;
             } catch (err) {
                 return {
                     content: [{ type: "text", text: `Failed to create channel group: ${err}` }],
@@ -359,7 +364,12 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
             }
 
             // Connect queen to all channels for monitoring
-            const allChannelNames = [GENERAL_CHANNEL, QUEEN_INBOX, ...agentNames.map(inboxName)];
+            const allChannelNames = [
+                GENERAL_CHANNEL,
+                QUEEN_INBOX,
+                ...agentNames.map(inboxName),
+                ...topicChannels.values(),
+            ];
             let queenClients;
             try {
                 queenClients = await connectToMultiple(group.path, allChannelNames);
@@ -449,8 +459,9 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
             for (const agentDef of params.agents) {
                 const agentInfo = agentMap.get(agentDef.name)!;
                 const agentFileInfo = scaffoldResult?.agentFiles.get(agentDef.name);
+                const agentTopicChannel = topicChannels.get(agentDef.swarm);
                 const { process: proc } = spawnAgent(
-                    agentDef, group.path, taskDirPath, ctx.cwd, knownAgents, agentFileInfo, agentNames,
+                    agentDef, group.path, taskDirPath, ctx.cwd, knownAgents, agentFileInfo, agentNames, agentTopicChannel,
                 );
 
                 agentInfo.process = proc;

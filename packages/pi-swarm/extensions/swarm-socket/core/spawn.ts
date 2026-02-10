@@ -46,6 +46,7 @@ export function spawnAgent(
     knownAgents?: Map<string, AgentConfig>,
     agentFiles?: AgentFiles,
     swarmAgentNames?: string[],
+    topicChannel?: string,
 ): { process: ChildProcess; tmpDir?: string } {
     // Clone to avoid mutating caller's params
     agentDef = { ...agentDef };
@@ -88,6 +89,7 @@ export function spawnAgent(
         agentName: agentDef.name,
         swarmAgents: swarmAgentNames ?? [agentDef.name],
         agentFiles,
+        topicChannel,
     });
 
     const { dir: tmpDir, filePath: tmpPromptPath } = writePromptToTempFile(agentDef.name, systemPrompt);
@@ -98,13 +100,18 @@ export function spawnAgent(
 
     // Environment variables for channel connection
     const inbox = inboxName(agentDef.name);
+    const subscribeChannels = [GENERAL_CHANNEL, QUEEN_INBOX];
+    if (topicChannel) {
+        subscribeChannels.push(topicChannel);
+    }
     const env: Record<string, string | undefined> = {
         ...process.env,
         // Channel configuration
         [ENV.GROUP]: channelGroupPath,
         [ENV.INBOX]: inbox,
-        [ENV.SUBSCRIBE]: [GENERAL_CHANNEL, QUEEN_INBOX].join(","),
+        [ENV.SUBSCRIBE]: subscribeChannels.join(","),
         [ENV.NAME]: agentDef.name,
+        [ENV.TOPIC]: topicChannel ?? "",
         // Legacy/role info (still useful for identity)
         PI_SWARM_AGENT_NAME: agentDef.name,
         PI_SWARM_AGENT_ROLE: agentDef.role,

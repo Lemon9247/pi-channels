@@ -30,7 +30,11 @@ describe("flat swarm communication", () => {
 
     it("3 agents + queen full communication flow", async () => {
         const agentNames = ["agent a1", "agent a2", "agent a3"];
-        group = await createSwarmChannelGroup("flat-swarm-test", agentNames);
+        const { group: g } = await createSwarmChannelGroup(
+            "flat-swarm-test",
+            agentNames.map((name) => ({ name, swarm: "test" })),
+        );
+        group = g;
 
         // Queen connects to all channels
         const queenChannels = [
