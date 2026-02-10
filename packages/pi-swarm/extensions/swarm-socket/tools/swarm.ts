@@ -206,6 +206,14 @@ function handleQueenMessage(
     const type = msg.data.type as string;
     const senderName = (msg.data.from as string) || "unknown";
 
+    // Dedup: messages sent to both QUEEN_INBOX and GENERAL (defense-in-depth)
+    // are only processed from QUEEN_INBOX. General is the fallback channel —
+    // if the queen got it on QUEEN_INBOX, ignore the duplicate on general.
+    const primaryOnQueenInbox = ["done", "blocker", "progress", "register"];
+    if (primaryOnQueenInbox.includes(type) && fromChannel === GENERAL_CHANNEL) {
+        return;
+    }
+
     switch (type) {
         case "register": {
             updateAgentStatus(senderName, "running");
