@@ -15,7 +15,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { createSwarmSystemPrompt } from "./prompts.js";
+import { buildSystemPrompt } from "./prompts.js";
 import { type AgentConfig } from "./agents.js";
 import type { AgentFiles } from "./scaffold.js";
 import { ENV, inboxName, GENERAL_CHANNEL, QUEEN_INBOX } from "./channels.js";
@@ -45,6 +45,7 @@ export function spawnAgent(
     defaultCwd: string,
     knownAgents?: Map<string, AgentConfig>,
     agentFiles?: AgentFiles,
+    swarmAgentNames?: string[],
 ): { process: ChildProcess; tmpDir?: string } {
     // Clone to avoid mutating caller's params
     agentDef = { ...agentDef };
@@ -82,7 +83,12 @@ export function spawnAgent(
     if (agentDef.systemPrompt) {
         systemPrompt = agentDef.systemPrompt + "\n\n";
     }
-    systemPrompt += createSwarmSystemPrompt(agentDef.name, agentDef.role, agentFiles);
+    systemPrompt += buildSystemPrompt({
+        role: agentDef.role as "agent" | "coordinator",
+        agentName: agentDef.name,
+        swarmAgents: swarmAgentNames ?? [agentDef.name],
+        agentFiles,
+    });
 
     const { dir: tmpDir, filePath: tmpPromptPath } = writePromptToTempFile(agentDef.name, systemPrompt);
     args.push("--append-system-prompt", tmpPromptPath);

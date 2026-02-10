@@ -450,7 +450,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                 const agentInfo = agentMap.get(agentDef.name)!;
                 const agentFileInfo = scaffoldResult?.agentFiles.get(agentDef.name);
                 const { process: proc } = spawnAgent(
-                    agentDef, group.path, taskDirPath, ctx.cwd, knownAgents, agentFileInfo,
+                    agentDef, group.path, taskDirPath, ctx.cwd, knownAgents, agentFileInfo, agentNames,
                 );
 
                 agentInfo.process = proc;
