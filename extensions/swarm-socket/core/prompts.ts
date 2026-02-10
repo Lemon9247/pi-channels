@@ -45,7 +45,7 @@ ${filePathsSection}
 
 **Progress reporting**: Call hive_progress periodically to let the dashboard show what phase you're in. Especially useful before long operations.
 
-**Keep socket messages minimal**: The reason/description/summary fields are short labels. Put detailed findings in the hive-mind file, not in the socket message.
+**Keep channel messages minimal**: The reason/description/summary fields are short labels. Put detailed findings in the hive-mind file, not in the channel message.
 
 **CRITICAL — Hive-mind file is shared**: Multiple agents write to the same hive-mind file. NEVER use the write tool to overwrite it. ALWAYS use the edit tool to surgically insert your content into the appropriate section. Read the file first to see what others have written, then use edit to add your findings below theirs. If you overwrite the file, you will destroy other agents' work.
 

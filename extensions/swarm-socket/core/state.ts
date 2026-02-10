@@ -7,8 +7,7 @@
  */
 
 import type { ChildProcess } from "node:child_process";
-import type { ChannelGroup } from "../../../../agent-channels/dist/index.js";
-import type { ChannelClient } from "../../../../agent-channels/dist/index.js";
+import type { ChannelGroup, ChannelClient } from "../../../../agent-channels/dist/index.js";
 
 export type AgentStatus = "starting" | "running" | "done" | "blocked" | "disconnected" | "crashed";
 

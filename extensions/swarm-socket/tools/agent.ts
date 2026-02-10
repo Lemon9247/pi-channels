@@ -161,6 +161,7 @@ export function registerAgentTools(pi: ExtensionAPI): void {
                 data: {
                     type: "nudge",
                     from: identity.name,
+                    role: identity.role,
                     reason: params.reason,
                     to: params.to,
                     ...payload,
@@ -281,6 +282,7 @@ export function registerAgentTools(pi: ExtensionAPI): void {
                 data: {
                     type: "done",
                     from: identity.name,
+                    role: identity.role,
                     summary: params.summary,
                 },
             };

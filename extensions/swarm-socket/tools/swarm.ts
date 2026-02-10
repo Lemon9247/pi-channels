@@ -78,6 +78,37 @@ interface ToolContext {
 }
 
 /**
+ * Relay an event up to the parent swarm (coordinator → queen).
+ * No-op if we're not a coordinator (no parent clients).
+ */
+function relayToParent(
+    event: string,
+    name: string,
+    agent: AgentInfo | undefined,
+    extra?: Record<string, unknown>,
+): void {
+    const clients = getParentClients();
+    if (!clients) return;
+    const queenClient = clients.get(QUEEN_INBOX);
+    if (!queenClient?.connected) return;
+    try {
+        queenClient.send({
+            msg: `relay: ${event}`,
+            data: {
+                type: "relay",
+                relay: {
+                    event,
+                    name,
+                    role: agent?.role || "agent",
+                    swarm: agent?.swarm || "unknown",
+                    ...extra,
+                },
+            },
+        });
+    } catch { /* ignore */ }
+}
+
+/**
  * Handle a relay event that a coordinator forwarded from a sub-agent.
  * Adds/updates the sub-agent in the queen's state for the dashboard.
  */
@@ -188,29 +219,7 @@ function handleQueenMessage(
             updateAgentStatus(senderName, "done", { doneSummary: summary });
             state.onAgentDone?.(senderName, summary);
             updateDashboard(ctx);
-
-            // Relay up to parent if we're a coordinator
-            const parentClients = getParentClients();
-            if (parentClients) {
-                const queenInbox = parentClients.get(QUEEN_INBOX);
-                if (queenInbox?.connected) {
-                    const agent = agentMap.get(senderName);
-                    try {
-                        queenInbox.send({
-                            msg: `relay: ${senderName} done`,
-                            data: {
-                                type: "relay",
-                                relay: {
-                                    event: "done", name: senderName,
-                                    role: agent?.role || "agent",
-                                    swarm: agent?.swarm || "unknown",
-                                    summary,
-                                },
-                            },
-                        });
-                    } catch { /* ignore */ }
-                }
-            }
+            relayToParent("done", senderName, agentMap.get(senderName), { summary });
             break;
         }
 
@@ -219,58 +228,14 @@ function handleQueenMessage(
             updateAgentStatus(senderName, "blocked", { blockerDescription: description });
             state.onBlocker?.(senderName, description);
             updateDashboard(ctx);
-
-            // Relay up
-            const parentClients2 = getParentClients();
-            if (parentClients2) {
-                const queenInbox = parentClients2.get(QUEEN_INBOX);
-                if (queenInbox?.connected) {
-                    const agent = agentMap.get(senderName);
-                    try {
-                        queenInbox.send({
-                            msg: `relay: ${senderName} blocked`,
-                            data: {
-                                type: "relay",
-                                relay: {
-                                    event: "blocked", name: senderName,
-                                    role: agent?.role || "agent",
-                                    swarm: agent?.swarm || "unknown",
-                                    description,
-                                },
-                            },
-                        });
-                    } catch { /* ignore */ }
-                }
-            }
+            relayToParent("blocked", senderName, agentMap.get(senderName), { description });
             break;
         }
 
         case "nudge": {
             const reason = (msg.data.reason as string) || msg.msg;
             state.onNudge?.(reason, senderName);
-
-            // Relay up
-            const parentClients3 = getParentClients();
-            if (parentClients3) {
-                const queenInbox = parentClients3.get(QUEEN_INBOX);
-                if (queenInbox?.connected) {
-                    const agent = Array.from(state.agents.values()).find(a => a.name === senderName);
-                    try {
-                        queenInbox.send({
-                            msg: `relay: ${senderName} nudge`,
-                            data: {
-                                type: "relay",
-                                relay: {
-                                    event: "nudge", name: senderName,
-                                    role: agent?.role || "agent",
-                                    swarm: agent?.swarm || "unknown",
-                                    reason,
-                                },
-                            },
-                        });
-                    } catch { /* ignore */ }
-                }
-            }
+            relayToParent("nudge", senderName, agentMap.get(senderName), { reason });
             break;
         }
 
@@ -410,9 +375,9 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
             };
 
             // Wire up notifications to pi.sendMessage
-            state.onAgentDone = (agentName, summary) => {
+            state.onAgentDone = (_agentName, _summary) => {
                 if (getSwarmGeneration() !== gen) return;
-                updateDashboard(ctx);
+                // Dashboard update handled by handleQueenMessage after status update
             };
 
             state.onAllDone = () => {
