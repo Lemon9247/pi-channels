@@ -2,21 +2,24 @@
  * Swarm Tool
  *
  * Non-blocking tool that spawns agents as background processes.
- * Returns immediately — results flow back via socket notifications.
+ * Returns immediately — results flow back via channel notifications.
  *
- * Two modes:
- * - Queen: creates socket server, spawns agents
- * - Coordinator: reuses existing socket, spawns sub-agents
+ * Creates a ChannelGroup with general + per-agent inbox channels.
+ * Queen monitors all channels for status updates.
  */
 
-import * as os from "node:os";
-import * as path from "node:path";
 import * as crypto from "node:crypto";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { SwarmServer } from "../core/server.js";
-import { UnixTransportServer } from "../transport/unix-socket.js";
+import type { Message } from "../../../../agent-channels/dist/index.js";
+import {
+    createSwarmChannelGroup,
+    connectToMultiple,
+    GENERAL_CHANNEL,
+    QUEEN_INBOX,
+    inboxName,
+} from "../core/channels.js";
 import {
     type AgentInfo,
     type SwarmState,
@@ -25,10 +28,8 @@ import {
     setSwarmState,
     updateAgentStatus,
     cleanupSwarm,
-    parseSubRelay,
-    getParentClient,
+    getParentClients,
 } from "../core/state.js";
-import type { RelayEvent, RelayMessage } from "../transport/protocol.js";
 import { getIdentity } from "../core/identity.js";
 import { scaffoldTaskDir, scaffoldCoordinatorSubDir, type ScaffoldResult } from "../core/scaffold.js";
 import { spawnAgent } from "../core/spawn.js";
@@ -44,9 +45,7 @@ const AgentDef = Type.Object({
     }),
     swarm: Type.String({ description: "Swarm this agent belongs to" }),
     task: Type.String({ description: "Task to delegate to this agent" }),
-    // Pre-defined agent (by name from ~/.pi/agent/agents/)
     agent: Type.Optional(Type.String({ description: "Name of a pre-defined agent to use" })),
-    // Inline definition
     systemPrompt: Type.Optional(Type.String({ description: "Custom system prompt for inline agent" })),
     tools: Type.Optional(Type.Array(Type.String(), { description: "Tools for inline agent" })),
     model: Type.Optional(Type.String({ description: "Model for this agent" })),
@@ -63,9 +62,8 @@ const SwarmParams = Type.Object({
     taskDir: Type.Optional(TaskDirDef),
 });
 
-function generateSocketPath(): string {
-    const id = crypto.randomBytes(4).toString("hex");
-    return path.join(os.tmpdir(), `pi-swarm-${id}.sock`);
+function generateSwarmId(): string {
+    return crypto.randomBytes(4).toString("hex");
 }
 
 /** Minimal structural type for the tool execution context from pi. */
@@ -80,72 +78,216 @@ interface ToolContext {
 }
 
 /**
- * Handle a sub-agent relay event that bubbled up from a coordinator.
- * Adds/updates the sub-agent in the queen's state so the dashboard can show it.
- * Also forwards the relay further up if we have a parent (passthrough for deep trees).
- *
- * Accepts the new RelayEvent format. Legacy SubAgentRelay is converted before calling this.
+ * Handle a relay event that a coordinator forwarded from a sub-agent.
+ * Adds/updates the sub-agent in the queen's state for the dashboard.
  */
-function handleRelayEvent(state: SwarmState, relay: RelayEvent, ctx: ToolContext): void {
-    const existing = state.agents.get(relay.name);
+function handleRelayEvent(
+    state: SwarmState,
+    relay: Record<string, unknown>,
+    ctx: ToolContext,
+): void {
+    const name = relay.name as string;
+    const event = relay.event as string;
+    const role = (relay.role as string) || "agent";
+    const swarm = (relay.swarm as string) || "unknown";
+    const existing = state.agents.get(name);
 
-    if (relay.event === "register") {
+    if (event === "register") {
         if (!existing) {
-            state.agents.set(relay.name, {
-                name: relay.name,
-                role: relay.role as "coordinator" | "agent",
-                swarm: relay.swarm,
+            state.agents.set(name, {
+                name,
+                role: role as "coordinator" | "agent",
+                swarm,
                 task: "(sub-agent)",
                 status: "running",
-                code: relay.code,
             });
         }
-        pushSyntheticEvent(relay.name, "message", `registered (${relay.role}, ${relay.swarm})`);
-    } else if (relay.event === "done") {
+        pushSyntheticEvent(name, "message", `registered (${role}, ${swarm})`);
+    } else if (event === "done") {
+        const summary = relay.summary as string | undefined;
         if (existing) {
-            updateAgentStatus(relay.name, "done", { doneSummary: relay.summary });
+            updateAgentStatus(name, "done", { doneSummary: summary });
         } else {
-            state.agents.set(relay.name, {
-                name: relay.name,
-                role: relay.role as "coordinator" | "agent",
-                swarm: relay.swarm,
+            state.agents.set(name, {
+                name,
+                role: role as "coordinator" | "agent",
+                swarm,
                 task: "(sub-agent)",
                 status: "done",
-                code: relay.code,
-                doneSummary: relay.summary,
+                doneSummary: summary,
             });
         }
-        pushSyntheticEvent(relay.name, "tool_end", `✓ done: ${relay.summary || "completed"}`);
-    } else if (relay.event === "blocked") {
+        pushSyntheticEvent(name, "tool_end", `✓ done: ${summary || "completed"}`);
+    } else if (event === "blocked") {
+        const description = relay.description as string | undefined;
         if (existing) {
-            updateAgentStatus(relay.name, "blocked", { blockerDescription: relay.description });
+            updateAgentStatus(name, "blocked", { blockerDescription: description });
         } else {
-            state.agents.set(relay.name, {
-                name: relay.name,
-                role: relay.role as "coordinator" | "agent",
-                swarm: relay.swarm,
+            state.agents.set(name, {
+                name,
+                role: role as "coordinator" | "agent",
+                swarm,
                 task: "(sub-agent)",
                 status: "blocked",
-                code: relay.code,
-                blockerDescription: relay.description,
+                blockerDescription: description,
             });
         }
-        pushSyntheticEvent(relay.name, "tool_end", `⚠ blocked: ${relay.description || "unknown"}`);
-    } else if (relay.event === "disconnected") {
+        pushSyntheticEvent(name, "tool_end", `⚠ blocked: ${description || "unknown"}`);
+    } else if (event === "disconnected") {
         if (existing) {
-            updateAgentStatus(relay.name, "disconnected");
+            updateAgentStatus(name, "disconnected");
         }
-        pushSyntheticEvent(relay.name, "message", "disconnected");
-    } else if (relay.event === "nudge") {
-        pushSyntheticEvent(relay.name, "message", `hive-mind: ${relay.reason || ""}`);
+        pushSyntheticEvent(name, "message", "disconnected");
+    } else if (event === "nudge") {
+        pushSyntheticEvent(name, "message", `hive-mind: ${relay.reason || ""}`);
     }
 
     updateDashboard(ctx);
 
-    // Passthrough: if we have a parent, forward the relay up (deep trees)
-    const pc = getParentClient();
-    if (pc && pc.connected) {
-        pc.relay(relay);
+    // Passthrough: if we have parent channels, forward the relay up
+    const parentClients = getParentClients();
+    if (parentClients) {
+        const queenInbox = parentClients.get(QUEEN_INBOX);
+        if (queenInbox?.connected) {
+            try {
+                queenInbox.send({ msg: `relay: ${name} ${event}`, data: { type: "relay", relay } });
+            } catch { /* ignore */ }
+        }
+    }
+}
+
+/**
+ * Handle an incoming channel message from the queen's perspective.
+ * Parses data.type to dispatch to appropriate handler.
+ */
+function handleQueenMessage(
+    state: SwarmState,
+    gen: number,
+    msg: Message,
+    fromChannel: string,
+    agentMap: Map<string, AgentInfo>,
+    ctx: ToolContext,
+    pi: ExtensionAPI,
+): void {
+    if (getSwarmGeneration() !== gen) return;
+    if (!msg.data || !msg.data.type) return;
+
+    const type = msg.data.type as string;
+    const senderName = (msg.data.from as string) || "unknown";
+
+    switch (type) {
+        case "done": {
+            const summary = (msg.data.summary as string) || "";
+            updateAgentStatus(senderName, "done", { doneSummary: summary });
+            state.onAgentDone?.(senderName, summary);
+            updateDashboard(ctx);
+
+            // Relay up to parent if we're a coordinator
+            const parentClients = getParentClients();
+            if (parentClients) {
+                const queenInbox = parentClients.get(QUEEN_INBOX);
+                if (queenInbox?.connected) {
+                    const agent = agentMap.get(senderName);
+                    try {
+                        queenInbox.send({
+                            msg: `relay: ${senderName} done`,
+                            data: {
+                                type: "relay",
+                                relay: {
+                                    event: "done", name: senderName,
+                                    role: agent?.role || "agent",
+                                    swarm: agent?.swarm || "unknown",
+                                    summary,
+                                },
+                            },
+                        });
+                    } catch { /* ignore */ }
+                }
+            }
+            break;
+        }
+
+        case "blocker": {
+            const description = (msg.data.description as string) || "";
+            updateAgentStatus(senderName, "blocked", { blockerDescription: description });
+            state.onBlocker?.(senderName, description);
+            updateDashboard(ctx);
+
+            // Relay up
+            const parentClients2 = getParentClients();
+            if (parentClients2) {
+                const queenInbox = parentClients2.get(QUEEN_INBOX);
+                if (queenInbox?.connected) {
+                    const agent = agentMap.get(senderName);
+                    try {
+                        queenInbox.send({
+                            msg: `relay: ${senderName} blocked`,
+                            data: {
+                                type: "relay",
+                                relay: {
+                                    event: "blocked", name: senderName,
+                                    role: agent?.role || "agent",
+                                    swarm: agent?.swarm || "unknown",
+                                    description,
+                                },
+                            },
+                        });
+                    } catch { /* ignore */ }
+                }
+            }
+            break;
+        }
+
+        case "nudge": {
+            const reason = (msg.data.reason as string) || msg.msg;
+            state.onNudge?.(reason, senderName);
+
+            // Relay up
+            const parentClients3 = getParentClients();
+            if (parentClients3) {
+                const queenInbox = parentClients3.get(QUEEN_INBOX);
+                if (queenInbox?.connected) {
+                    const agent = Array.from(state.agents.values()).find(a => a.name === senderName);
+                    try {
+                        queenInbox.send({
+                            msg: `relay: ${senderName} nudge`,
+                            data: {
+                                type: "relay",
+                                relay: {
+                                    event: "nudge", name: senderName,
+                                    role: agent?.role || "agent",
+                                    swarm: agent?.swarm || "unknown",
+                                    reason,
+                                },
+                            },
+                        });
+                    } catch { /* ignore */ }
+                }
+            }
+            break;
+        }
+
+        case "progress": {
+            const agent = state.agents.get(senderName);
+            if (agent) {
+                if (msg.data.phase != null) agent.progressPhase = msg.data.phase as string;
+                if (msg.data.percent != null) agent.progressPercent = msg.data.percent as number;
+                if (msg.data.detail != null) agent.progressDetail = msg.data.detail as string;
+            }
+            const detail = (msg.data.detail as string) || (msg.data.phase as string) || "progress";
+            const pct = msg.data.percent != null ? ` (${msg.data.percent}%)` : "";
+            pushSyntheticEvent(senderName, "message", `${detail}${pct}`);
+            updateDashboard(ctx);
+            break;
+        }
+
+        case "relay": {
+            const relay = msg.data.relay as Record<string, unknown>;
+            if (relay) {
+                handleRelayEvent(state, relay, ctx);
+            }
+            break;
+        }
     }
 }
 
@@ -155,7 +297,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
         label: "Swarm",
         description:
             "Start a swarm of coordinated agents. Agents are spawned as background processes " +
-            "and communicate via a shared Unix socket. Returns immediately — use swarm_status " +
+            "and communicate via channels. Returns immediately — use swarm_status " +
             "to check progress and swarm_instruct to send instructions. " +
             "Results and notifications arrive asynchronously between your tool calls.",
         parameters: SwarmParams,
@@ -184,139 +326,32 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                 }
             }
 
-            // Always create a new socket for this swarm.
-            let socketPath: string;
-            let server: SwarmServer | null = null;
-
-            // Generation counter — declared here so all closures below can
-            // reference it. Assigned after setSwarmState() later in this function.
+            // Generation counter
             let gen: number;
 
-            {
-                socketPath = generateSocketPath();
-                server = new SwarmServer(new UnixTransportServer(socketPath), {
-                    onRegister: (client) => {
-                        if (getSwarmGeneration() !== gen) return;
-                        updateAgentStatus(client.name, "running");
-                        updateDashboard(ctx);
-                        // Relay registration up to parent
-                        const pc = getParentClient();
-                        if (pc && pc.connected) {
-                            const agent = agentMap.get(client.name);
-                            pc.relay({
-                                event: "register",
-                                name: client.name,
-                                role: client.role,
-                                swarm: client.swarm || "unknown",
-                                code: agent?.code || "?",
-                            });
-                        }
-                    },
-                    onMessage: (_from, msg) => {
-                        if (getSwarmGeneration() !== gen) return;
-                        const state = getSwarmState();
-                        if (!state) return;
-
-                        if (msg.type === "done") {
-                            const doneMsg = msg as { type: "done"; summary: string };
-                            updateAgentStatus(_from.name, "done", { doneSummary: doneMsg.summary });
-                            state.onAgentDone?.(_from.name, doneMsg.summary);
-                        } else if (msg.type === "blocker") {
-                            const blockerMsg = msg as { type: "blocker"; description: string };
-                            updateAgentStatus(_from.name, "blocked", { blockerDescription: blockerMsg.description });
-                            state.onBlocker?.(_from.name, blockerMsg.description);
-                        } else if (msg.type === "relay") {
-                            // First-class relay message
-                            const relayMsg = msg as RelayMessage;
-                            handleRelayEvent(state, relayMsg.relay, ctx);
-                        } else if (msg.type === "nudge") {
-                            const nudgeMsg = msg as { type: "nudge"; reason: string };
-                            const reason = nudgeMsg.reason;
-
-                            // BACKWARD COMPAT ONLY: Before P2C added first-class RelayMessage,
-                            // coordinators relayed sub-agent events by JSON-encoding them into
-                            // nudge reasons (SubAgentRelay format). New code uses client.relay()
-                            // which produces a RelayMessage handled above. This fallback remains
-                            // to support any older agents that haven't been updated yet.
-                            const legacyRelay = parseSubRelay(reason);
-                            if (legacyRelay) {
-                                handleRelayEvent(state, {
-                                    event: legacyRelay.type,
-                                    name: legacyRelay.name,
-                                    role: legacyRelay.role,
-                                    swarm: legacyRelay.swarm,
-                                    code: legacyRelay.code,
-                                    summary: legacyRelay.summary,
-                                    description: legacyRelay.description,
-                                    reason: legacyRelay.reason,
-                                }, ctx);
-                                return;
-                            }
-
-                            state.onNudge?.(reason, _from.name);
-                        } else if (msg.type === "progress") {
-                            // Progress messages: update agent info and activity feed
-                            const progressMsg = msg as { type: "progress"; phase?: string; percent?: number; detail?: string };
-                            const agent = state.agents.get(_from.name);
-                            if (agent) {
-                                if (progressMsg.phase != null) agent.progressPhase = progressMsg.phase;
-                                if (progressMsg.percent != null) agent.progressPercent = progressMsg.percent;
-                                if (progressMsg.detail != null) agent.progressDetail = progressMsg.detail;
-                            }
-                            const detail = progressMsg.detail || progressMsg.phase || "progress";
-                            const pct = progressMsg.percent != null ? ` (${progressMsg.percent}%)` : "";
-                            pushSyntheticEvent(_from.name, "message", `${detail}${pct}`);
-                            updateDashboard(ctx);
-                        }
-                    },
-                    onDisconnect: (client) => {
-                        if (getSwarmGeneration() !== gen) return;
-                        const state = getSwarmState();
-                        if (!state) return;
-                        const agent = state.agents.get(client.name);
-                        if (agent && agent.status !== "done") {
-                            updateAgentStatus(client.name, "disconnected");
-                            updateDashboard(ctx);
-                            const pc = getParentClient();
-                            if (pc && pc.connected) {
-                                pc.relay({
-                                    event: "disconnected",
-                                    name: client.name,
-                                    role: client.role,
-                                    swarm: client.swarm || "unknown",
-                                    code: agent.code,
-                                });
-                            }
-                        }
-                    },
-                });
-
-                try {
-                    await server.start();
-                } catch (err) {
-                    return {
-                        content: [{ type: "text", text: `Failed to start swarm socket: ${err}` }],
-                        details: {},
-                        isError: true,
-                    };
-                }
+            // Create channel group
+            const swarmId = generateSwarmId();
+            const agentNames = params.agents.map((a) => a.name);
+            let group;
+            try {
+                group = await createSwarmChannelGroup(swarmId, agentNames);
+            } catch (err) {
+                return {
+                    content: [{ type: "text", text: `Failed to create channel group: ${err}` }],
+                    details: {},
+                    isError: true,
+                };
             }
 
-            // My code in the hierarchy (queen="0", coordinators="0.1", etc.)
-            const myCode = getIdentity().code;
-
-            // Build agent info with hierarchical codes
+            // Build agent info map
             const agentMap = new Map<string, AgentInfo>();
-            for (let i = 0; i < params.agents.length; i++) {
-                const agentDef = params.agents[i];
-                const childCode = `${myCode}.${i + 1}`;
+            for (const agentDef of params.agents) {
                 agentMap.set(agentDef.name, {
                     name: agentDef.name,
                     role: agentDef.role,
                     swarm: agentDef.swarm,
                     task: agentDef.task,
                     status: "starting",
-                    code: childCode,
                 });
             }
 
@@ -326,7 +361,6 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
             const parentTaskDir = process.env.PI_SWARM_TASK_DIR;
 
             if (params.taskDir) {
-                // Explicit taskDir — queen case
                 taskDirPath = params.taskDir.path;
                 scaffoldResult = scaffoldTaskDir(
                     taskDirPath,
@@ -334,7 +368,6 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                     Array.from(agentMap.values()),
                 );
             } else if (parentTaskDir) {
-                // Coordinator case — derive subdirectory from parent task dir
                 const mySwarm = getIdentity().swarm || "default";
                 scaffoldResult = scaffoldCoordinatorSubDir(
                     parentTaskDir,
@@ -345,31 +378,34 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                 taskDirPath = scaffoldResult.taskDirPath;
             }
 
+            // Connect queen to all channels for monitoring
+            const allChannelNames = [GENERAL_CHANNEL, QUEEN_INBOX, ...agentNames.map(inboxName)];
+            let queenClients;
+            try {
+                queenClients = await connectToMultiple(group.path, allChannelNames);
+            } catch (err) {
+                await group.stop({ removeDir: true });
+                return {
+                    content: [{ type: "text", text: `Failed to connect queen to channels: ${err}` }],
+                    details: {},
+                    isError: true,
+                };
+            }
+
             // Set up state
             const state: SwarmState = {
                 generation: 0,
-                server,
-                socketPath,
+                group,
+                groupPath: group.path,
                 agents: agentMap,
                 taskDirPath,
+                queenClients,
             };
 
-            // Detect if we're a coordinator (have a parent socket to relay to)
-            const parentClient = getParentClient();
-
-            // Wire up notifications to pi.sendMessage + optional upward relay
+            // Wire up notifications to pi.sendMessage
             state.onAgentDone = (agentName, summary) => {
                 if (getSwarmGeneration() !== gen) return;
                 updateDashboard(ctx);
-                if (parentClient && parentClient.connected) {
-                    const agent = agentMap.get(agentName);
-                    parentClient.relay({
-                        event: "done",
-                        name: agentName, role: agent?.role || "agent",
-                        swarm: agent?.swarm || "unknown", code: agent?.code || "?",
-                        summary,
-                    });
-                }
             };
 
             state.onAllDone = () => {
@@ -399,15 +435,6 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                     { deliverAs: "steer" },
                 );
                 updateDashboard(ctx);
-                if (parentClient && parentClient.connected) {
-                    const agent = state.agents.get(agentName);
-                    parentClient.relay({
-                        event: "blocked",
-                        name: agentName, role: agent?.role || "agent",
-                        swarm: agent?.swarm || "unknown", code: agent?.code || "?",
-                        description,
-                    });
-                }
             };
 
             state.onNudge = (reason, from) => {
@@ -420,19 +447,27 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                     },
                     { deliverAs: "followUp" },
                 );
-                if (parentClient && parentClient.connected) {
-                    const agent = Array.from(state.agents.values()).find(a => a.name === from);
-                    parentClient.relay({
-                        event: "nudge",
-                        name: from, role: agent?.role || "agent",
-                        swarm: agent?.swarm || "unknown", code: agent?.code || "?",
-                        reason,
-                    });
-                }
             };
 
             setSwarmState(state);
             gen = getSwarmGeneration();
+
+            // Set up message listeners on all queen channels
+            for (const [channelName, client] of queenClients.entries()) {
+                client.on("message", (msg: Message) => {
+                    if (getSwarmGeneration() !== gen) return;
+                    const currentState = getSwarmState();
+                    if (!currentState) return;
+                    handleQueenMessage(currentState, gen, msg, channelName, agentMap, ctx, pi);
+                });
+            }
+
+            // Track agent registrations via the general channel
+            // Agents send a "register" message when they connect
+            const generalChannel = group.channel(GENERAL_CHANNEL);
+            generalChannel.on("connect", (_clientId: string) => {
+                // A client connected to general — we'll get their register message soon
+            });
 
             // Cache agent discovery once for all spawns
             const knownAgents = discoverAgents(ctx.cwd);
@@ -441,18 +476,20 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
             for (const agentDef of params.agents) {
                 const agentInfo = agentMap.get(agentDef.name)!;
                 const agentFileInfo = scaffoldResult?.agentFiles.get(agentDef.name);
-                const { process: proc } = spawnAgent(agentDef, socketPath, taskDirPath, ctx.cwd, agentInfo.code, knownAgents, agentFileInfo);
+                const { process: proc } = spawnAgent(
+                    agentDef, group.path, taskDirPath, ctx.cwd, knownAgents, agentFileInfo,
+                );
 
                 agentInfo.process = proc;
 
                 // Capture stderr for debugging
                 let stderr = "";
-                proc.stderr?.on("data", (data) => {
+                proc.stderr?.on("data", (data: Buffer) => {
                     stderr = (stderr + data.toString()).slice(-2048);
                 });
 
                 // Track process exit
-                proc.on("close", (code) => {
+                proc.on("close", (code: number | null) => {
                     if (getSwarmGeneration() !== gen) return;
                     const current = getSwarmState();
                     if (!current) return;
@@ -476,7 +513,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                     }
                 });
 
-                proc.on("error", (err) => {
+                proc.on("error", (err: Error) => {
                     if (getSwarmGeneration() !== gen) return;
                     updateAgentStatus(agentDef.name, "crashed");
                     pi.sendMessage(
@@ -530,7 +567,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                         type: "text",
                         text:
                             `Swarm started with ${params.agents.length} agent(s):\n${agentList}\n\n` +
-                            `Socket: ${socketPath}\n` +
+                            `Channels: ${group.path}\n` +
                             (taskDirPath ? `Task dir: ${taskDirPath}\n` : "") +
                             `\nAgents are running in the background. ` +
                             `Use \`swarm_status\` to check progress, \`swarm_instruct\` to send instructions.`,
@@ -538,7 +575,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                 ],
                 details: {
                     agentCount: params.agents.length,
-                    socketPath,
+                    groupPath: group.path,
                     taskDirPath,
                 },
             };
