@@ -2,17 +2,51 @@
  * Agent Tools
  *
  * Tools available to agents inside a swarm:
+ * - hive_progress: Report progress to the dashboard
  * - hive_notify: Nudge teammates to check the hive-mind
  * - hive_blocker: Signal that you're blocked
  * - hive_done: Signal task completion
+ *
+ * Each tool sends a Message to the appropriate channel(s).
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { SwarmClient } from "../core/client.js";
+import type { ChannelClient, Message } from "../../../../agent-channels/dist/index.js";
+import { getParentClients } from "../core/state.js";
+import { getIdentity } from "../core/identity.js";
+import { GENERAL_CHANNEL, QUEEN_INBOX, inboxName } from "../core/channels.js";
 
-export function registerAgentTools(pi: ExtensionAPI, client: SwarmClient): void {
+/**
+ * Get a connected ChannelClient by channel name from parent clients.
+ * Returns null if not connected or channel not found.
+ */
+function getClient(channelName: string): ChannelClient | null {
+    const clients = getParentClients();
+    if (!clients) return null;
+    const client = clients.get(channelName);
+    if (!client || !client.connected) return null;
+    return client;
+}
+
+/**
+ * Send a message to a channel. Returns true if sent, false if not connected.
+ */
+function sendToChannel(channelName: string, msg: Message): boolean {
+    const client = getClient(channelName);
+    if (!client) return false;
+    try {
+        client.send(msg);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+export function registerAgentTools(pi: ExtensionAPI): void {
+    const identity = getIdentity();
+
     // === hive_progress ===
     pi.registerTool({
         name: "hive_progress",
@@ -33,34 +67,35 @@ export function registerAgentTools(pi: ExtensionAPI, client: SwarmClient): void 
             })),
         }),
         async execute(_toolCallId, params) {
-            if (!client.connected) {
-                return {
-                    content: [{ type: "text", text: "Not connected to swarm socket. Progress not sent." }],
-                    details: {},
-                    isError: true,
-                };
-            }
-            try {
-                client.progress({
+            const parts: string[] = [];
+            if (params.phase) parts.push(params.phase);
+            if (params.percent != null) parts.push(`${params.percent}%`);
+            if (params.detail) parts.push(params.detail);
+
+            const msg: Message = {
+                msg: parts.join(" — ") || "progress",
+                data: {
+                    type: "progress",
+                    from: identity.name,
                     phase: params.phase,
                     percent: params.percent,
                     detail: params.detail,
-                });
-                const parts: string[] = [];
-                if (params.phase) parts.push(params.phase);
-                if (params.percent != null) parts.push(`${params.percent}%`);
-                if (params.detail) parts.push(params.detail);
+                },
+            };
+
+            const sent = sendToChannel(QUEEN_INBOX, msg);
+            if (!sent) {
                 return {
-                    content: [{ type: "text", text: `Progress: ${parts.join(" — ") || "(empty)"}` }],
-                    details: {},
-                };
-            } catch (err) {
-                return {
-                    content: [{ type: "text", text: `Failed to send progress: ${err}` }],
+                    content: [{ type: "text", text: "Not connected to swarm channels. Progress not sent." }],
                     details: {},
                     isError: true,
                 };
             }
+
+            return {
+                content: [{ type: "text", text: `Progress: ${parts.join(" — ") || "(empty)"}` }],
+                details: {},
+            };
         },
         renderCall(args, theme) {
             const parts: string[] = [];
@@ -82,6 +117,7 @@ export function registerAgentTools(pi: ExtensionAPI, client: SwarmClient): void 
         },
     });
 
+    // === hive_notify ===
     pi.registerTool({
         name: "hive_notify",
         label: "Hive Notify",
@@ -112,37 +148,47 @@ export function registerAgentTools(pi: ExtensionAPI, client: SwarmClient): void 
             })),
         }),
         async execute(_toolCallId, params) {
-            if (!client.connected) {
-                return {
-                    content: [{ type: "text", text: "Not connected to swarm socket. Notification not sent." }],
-                    details: {},
-                    isError: true,
-                };
-            }
-            try {
-                const payload: Record<string, unknown> = {};
-                if (params.file) payload.file = params.file;
-                if (params.snippet) payload.snippet = params.snippet;
-                if (params.section) payload.section = params.section;
-                if (params.tags) payload.tags = params.tags;
-                const hasPayload = Object.keys(payload).length > 0;
+            const payload: Record<string, unknown> = {};
+            if (params.file) payload.file = params.file;
+            if (params.snippet) payload.snippet = params.snippet;
+            if (params.section) payload.section = params.section;
+            if (params.tags) payload.tags = params.tags;
 
-                client.nudge(params.reason, {
+            const msg: Message = {
+                msg: params.reason,
+                data: {
+                    type: "nudge",
+                    from: identity.name,
+                    reason: params.reason,
                     to: params.to,
-                    payload: hasPayload ? payload as any : undefined,
-                });
-                const target = params.to ? ` → ${params.to}` : "";
+                    ...payload,
+                },
+            };
+
+            let sent = false;
+            if (params.to) {
+                // Targeted: send to specific agent's inbox
+                sent = sendToChannel(inboxName(params.to), msg);
+                // Also send to general so queen sees it
+                sendToChannel(GENERAL_CHANNEL, msg);
+            } else {
+                // Broadcast: send to general
+                sent = sendToChannel(GENERAL_CHANNEL, msg);
+            }
+
+            if (!sent) {
                 return {
-                    content: [{ type: "text", text: `Nudge sent${target}: "${params.reason}"` }],
-                    details: {},
-                };
-            } catch (err) {
-                return {
-                    content: [{ type: "text", text: `Failed to send nudge: ${err}` }],
+                    content: [{ type: "text", text: "Not connected to swarm channels. Notification not sent." }],
                     details: {},
                     isError: true,
                 };
             }
+
+            const target = params.to ? ` → ${params.to}` : "";
+            return {
+                content: [{ type: "text", text: `Nudge sent${target}: "${params.reason}"` }],
+                details: {},
+            };
         },
         renderCall(args, theme) {
             let text = theme.fg("toolTitle", theme.bold("hive_notify ")) +
@@ -160,6 +206,7 @@ export function registerAgentTools(pi: ExtensionAPI, client: SwarmClient): void 
         },
     });
 
+    // === hive_blocker ===
     pi.registerTool({
         name: "hive_blocker",
         label: "Hive Blocker",
@@ -173,26 +220,28 @@ export function registerAgentTools(pi: ExtensionAPI, client: SwarmClient): void 
             }),
         }),
         async execute(_toolCallId, params) {
-            if (!client.connected) {
+            const msg: Message = {
+                msg: params.description,
+                data: {
+                    type: "blocker",
+                    from: identity.name,
+                    description: params.description,
+                },
+            };
+
+            const sent = sendToChannel(QUEEN_INBOX, msg);
+            if (!sent) {
                 return {
-                    content: [{ type: "text", text: "Not connected to swarm socket. Blocker not sent." }],
+                    content: [{ type: "text", text: "Not connected to swarm channels. Blocker not sent." }],
                     details: {},
                     isError: true,
                 };
             }
-            try {
-                client.blocker(params.description);
-                return {
-                    content: [{ type: "text", text: `Blocker signalled: "${params.description}"` }],
-                    details: {},
-                };
-            } catch (err) {
-                return {
-                    content: [{ type: "text", text: `Failed to send blocker: ${err}` }],
-                    details: {},
-                    isError: true,
-                };
-            }
+
+            return {
+                content: [{ type: "text", text: `Blocker signalled: "${params.description}"` }],
+                details: {},
+            };
         },
         renderCall(args, theme) {
             return new Text(
@@ -209,6 +258,7 @@ export function registerAgentTools(pi: ExtensionAPI, client: SwarmClient): void 
         },
     });
 
+    // === hive_done ===
     pi.registerTool({
         name: "hive_done",
         label: "Hive Done",
@@ -222,26 +272,31 @@ export function registerAgentTools(pi: ExtensionAPI, client: SwarmClient): void 
             }),
         }),
         async execute(_toolCallId, params) {
-            if (!client.connected) {
+            const msg: Message = {
+                msg: params.summary,
+                data: {
+                    type: "done",
+                    from: identity.name,
+                    summary: params.summary,
+                },
+            };
+
+            // Send to both queen inbox and general
+            const sentQueen = sendToChannel(QUEEN_INBOX, msg);
+            sendToChannel(GENERAL_CHANNEL, msg);
+
+            if (!sentQueen) {
                 return {
-                    content: [{ type: "text", text: "Not connected to swarm socket. Done signal not sent." }],
+                    content: [{ type: "text", text: "Not connected to swarm channels. Done signal not sent." }],
                     details: {},
                     isError: true,
                 };
             }
-            try {
-                client.done(params.summary);
-                return {
-                    content: [{ type: "text", text: `Done: "${params.summary}"` }],
-                    details: {},
-                };
-            } catch (err) {
-                return {
-                    content: [{ type: "text", text: `Failed to send done: ${err}` }],
-                    details: {},
-                    isError: true,
-                };
-            }
+
+            return {
+                content: [{ type: "text", text: `Done: "${params.summary}"` }],
+                details: {},
+            };
         },
         renderCall(args, theme) {
             return new Text(
