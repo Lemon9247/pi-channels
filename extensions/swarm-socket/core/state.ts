@@ -3,12 +3,12 @@
  *
  * Module-level persistent state for the swarm extension.
  * Since the swarm tool returns immediately, we need to track
- * spawned processes, socket server, and agent status.
+ * spawned processes, channel group, and agent status.
  */
 
 import type { ChildProcess } from "node:child_process";
-import type { SwarmServer } from "./server.js";
-import type { SwarmClient } from "./client.js";
+import type { ChannelGroup } from "../../../../agent-channels/dist/index.js";
+import type { ChannelClient } from "../../../../agent-channels/dist/index.js";
 
 export type AgentStatus = "starting" | "running" | "done" | "blocked" | "disconnected" | "crashed";
 
@@ -18,47 +18,23 @@ export interface AgentInfo {
     swarm: string;
     task: string;
     status: AgentStatus;
-    code: string;     // Hierarchical address: "0.1.2" (queen=0, its children=0.1, 0.2, ...)
     process?: ChildProcess;
     doneSummary?: string;
     blockerDescription?: string;
-    progressPhase?: string;    // Current phase from ProgressMessage
-    progressPercent?: number;  // 0-100 from ProgressMessage
-    progressDetail?: string;   // Status line from ProgressMessage
-}
-
-/** @deprecated Use RelayEvent from protocol.ts instead. Kept for backward compat parsing. */
-export interface SubAgentRelay {
-    sub: true;
-    type: "register" | "done" | "blocked" | "nudge" | "disconnected";
-    name: string;
-    role: string;
-    swarm: string;
-    code: string;     // Hierarchical address of the sub-agent
-    summary?: string;
-    description?: string;
-    reason?: string;
-}
-
-/**
- * Try to parse a nudge reason as a sub-agent relay (old format).
- * Returns null if not a relay. Kept as backward-compat fallback.
- */
-export function parseSubRelay(reason: string): SubAgentRelay | null {
-    if (!reason.startsWith("{")) return null;
-    try {
-        const obj = JSON.parse(reason);
-        if (obj && obj.sub === true) return obj as SubAgentRelay;
-    } catch { /* not JSON */ }
-    return null;
+    progressPhase?: string;
+    progressPercent?: number;
+    progressDetail?: string;
 }
 
 export interface SwarmState {
-    generation: number;  // Monotonic ID — callbacks check this to detect stale swarms
-    server: SwarmServer | null; // null if we're reusing existing socket (coordinator)
-    socketPath: string;
+    generation: number;
+    group: ChannelGroup | null;
+    groupPath: string;
     agents: Map<string, AgentInfo>;
     taskDirPath?: string;
+
+    /** Queen's connected ChannelClients for monitoring all channels. */
+    queenClients: Map<string, ChannelClient>;
 
     // Callbacks for the extension to hook into
     onAgentDone?: (agentName: string, summary: string) => void;
@@ -68,7 +44,7 @@ export interface SwarmState {
 }
 
 let activeSwarm: SwarmState | null = null;
-let parentClient: SwarmClient | null = null;
+let parentClients: Map<string, ChannelClient> | null = null;
 let swarmGeneration = 0;
 
 export function getSwarmState(): SwarmState | null {
@@ -85,12 +61,14 @@ export function setSwarmState(state: SwarmState): void {
     activeSwarm = state;
 }
 
-export function getParentClient(): SwarmClient | null {
-    return parentClient;
+/** Get the agent's connected channels (inbox, general, etc.). */
+export function getParentClients(): Map<string, ChannelClient> | null {
+    return parentClients;
 }
 
-export function setParentClient(client: SwarmClient | null): void {
-    parentClient = client;
+/** Set the agent's connected channels. */
+export function setParentClients(clients: Map<string, ChannelClient> | null): void {
+    parentClients = clients;
 }
 
 export function updateAgentStatus(name: string, status: AgentStatus, extra?: Partial<AgentInfo>): void {
@@ -118,10 +96,9 @@ function checkAllDone(): void {
  * Graceful shutdown: ask agents to wrap up, wait for completion, then force-kill stragglers.
  */
 export async function gracefulShutdown(
-    server: SwarmServer,
     sendInstruct: (instruction: string) => void,
 ): Promise<void> {
-    const gen = swarmGeneration; // capture — don't kill a newer swarm
+    const gen = swarmGeneration;
     sendInstruct(
         "Wrap up your current work, write findings to hive-mind, and call hive_done. You have 30 seconds.",
     );
@@ -129,14 +106,14 @@ export async function gracefulShutdown(
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 2000));
-        if (!activeSwarm || activeSwarm.generation !== gen) return; // stale or replaced
+        if (!activeSwarm || activeSwarm.generation !== gen) return;
         const allFinished = Array.from(activeSwarm.agents.values()).every(
             (a) => a.status === "done" || a.status === "crashed" || a.status === "disconnected",
         );
         if (allFinished) break;
     }
 
-    if (!activeSwarm || activeSwarm.generation !== gen) return; // check before cleanup
+    if (!activeSwarm || activeSwarm.generation !== gen) return;
     await cleanupSwarm();
 }
 
@@ -147,13 +124,10 @@ export async function cleanupSwarm(): Promise<void> {
     for (const agent of activeSwarm.agents.values()) {
         if (agent.process && !agent.process.killed && agent.process.pid) {
             try {
-                // Kill the entire process group (coordinator + its sub-agents)
                 process.kill(-agent.process.pid, "SIGTERM");
             } catch {
-                // Process group may not exist; fall back to direct kill
                 try { agent.process.kill("SIGTERM"); } catch { /* ignore */ }
             }
-            // Force kill after 5 seconds
             const pid = agent.process.pid;
             setTimeout(() => {
                 try { process.kill(-pid, "SIGKILL"); } catch { /* ignore */ }
@@ -161,9 +135,17 @@ export async function cleanupSwarm(): Promise<void> {
         }
     }
 
-    // Stop server if we own it
-    if (activeSwarm.server) {
-        await activeSwarm.server.stop();
+    // Disconnect queen's monitoring clients
+    for (const client of activeSwarm.queenClients.values()) {
+        try { client.disconnect(); } catch { /* ignore */ }
+    }
+    activeSwarm.queenClients.clear();
+
+    // Stop channel group and remove directory
+    if (activeSwarm.group) {
+        try {
+            await activeSwarm.group.stop({ removeDir: true });
+        } catch { /* ignore */ }
     }
 
     activeSwarm = null;
