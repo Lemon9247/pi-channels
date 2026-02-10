@@ -1,7 +1,6 @@
 import { describe, it, beforeEach } from "node:test";
 import * as assert from "node:assert/strict";
 import * as path from "node:path";
-import * as fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import {

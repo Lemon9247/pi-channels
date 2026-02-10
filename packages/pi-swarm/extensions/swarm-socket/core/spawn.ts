@@ -31,7 +31,7 @@ export function writePromptToTempFile(name: string, prompt: string): { dir: stri
 export function spawnAgent(
     agentDef: {
         name: string;
-        role: string;
+        role: "agent" | "coordinator";
         swarm: string;
         task: string;
         agent?: string;
@@ -84,7 +84,7 @@ export function spawnAgent(
         systemPrompt = agentDef.systemPrompt + "\n\n";
     }
     systemPrompt += buildSystemPrompt({
-        role: agentDef.role as "agent" | "coordinator",
+        role: agentDef.role,
         agentName: agentDef.name,
         swarmAgents: swarmAgentNames ?? [agentDef.name],
         agentFiles,

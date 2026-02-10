@@ -34,7 +34,11 @@ Your report persists after the swarm ends and becomes part of the project's docu
 
 2. **Overview** — What was your task? What files/areas did you examine or modify? One paragraph.
 
-3. **Findings / Changes** — The substance of your work. Be specific: file paths, line numbers, code snippets.
+3. **Findings / Changes** — The substance of your work. Be specific:
+   - Reference exact file paths and line numbers.
+   - Include relevant code snippets (the key lines, not entire files).
+   - For review/research tasks: what did you discover? What's the architecture? What are the edge cases?
+   - For implementation tasks: what did you change and why? What was the before/after?
 
 4. **Observations** — Things beyond the immediate task: patterns, concerns, suggestions. This is the most valuable section — facts can be reconstructed from git, but your judgment cannot.
 
@@ -44,4 +48,6 @@ Your report persists after the swarm ends and becomes part of the project's docu
 
 ### Quality Bar
 
-A good report lets someone who wasn't in this swarm understand what happened without reading the code diff. Be thorough but not padded — every section should earn its space.
+- A good report lets someone who wasn't in this swarm understand what happened without reading the code diff.
+- Include enough context that the report is self-contained — don't assume the reader has the codebase open.
+- Be thorough but not padded. Every section should earn its space.

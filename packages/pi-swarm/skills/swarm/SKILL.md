@@ -95,7 +95,7 @@ Agents coordinate through two mechanisms:
 mkdir -p scratchpad/reports/YYYY-MM-DD-<task-name>/
 ```
 
-Use a short, descriptive name (kebab-case). For hierarchical swarms, prefix with `multi-`: `YYYY-MM-DD-multi-<task>/`.
+Use a short, descriptive name (kebab-case).
 
 ### 2. Identify Agents Needed
 

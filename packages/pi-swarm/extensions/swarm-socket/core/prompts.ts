@@ -46,17 +46,18 @@ const PROMPTS_DIR = path.resolve(
     "prompts",
 );
 
-let _store: PromptStore | null = null;
+const _cache = new Map<string, PromptStore>();
 
 /**
  * Load all .md files from a directory into a Map<name, content>.
- * Keys are filenames without extension.
+ * Keys are filenames without extension. Files are sorted alphabetically
+ * for deterministic ordering across filesystems.
  */
 function loadDir(dirPath: string): Map<string, string> {
     const result = new Map<string, string>();
     if (!fs.existsSync(dirPath)) return result;
-    for (const file of fs.readdirSync(dirPath)) {
-        if (!file.endsWith(".md")) continue;
+    const files = fs.readdirSync(dirPath).filter((f) => f.endsWith(".md")).sort();
+    for (const file of files) {
         const name = file.slice(0, -3); // strip .md
         const content = fs.readFileSync(path.join(dirPath, file), "utf-8");
         result.set(name, content);
@@ -66,22 +67,24 @@ function loadDir(dirPath: string): Map<string, string> {
 
 /**
  * Load all prompt files from the prompts/ directory.
- * Results are cached — subsequent calls return the same store.
+ * Results are cached per resolved directory path.
  */
 export function loadPrompts(promptsDir?: string): PromptStore {
-    if (_store) return _store;
-    const dir = promptsDir ?? PROMPTS_DIR;
-    _store = {
+    const dir = path.resolve(promptsDir ?? PROMPTS_DIR);
+    const cached = _cache.get(dir);
+    if (cached) return cached;
+    const store: PromptStore = {
         roles: loadDir(path.join(dir, "roles")),
         tools: loadDir(path.join(dir, "tools")),
         patterns: loadDir(path.join(dir, "patterns")),
     };
-    return _store;
+    _cache.set(dir, store);
+    return store;
 }
 
 /** Clear the cached prompt store (for testing). */
 export function clearPromptCache(): void {
-    _store = null;
+    _cache.clear();
 }
 
 // ─── Channel List Generation ─────────────────────────────────────────
