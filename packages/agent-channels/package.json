@@ -1,0 +1,43 @@
+{
+    "name": "agent-channels",
+    "version": "0.1.0",
+    "description": "Channel-based messaging over Unix domain sockets",
+    "type": "module",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js",
+            "default": "./dist/index.js"
+        }
+    },
+    "scripts": {
+        "build": "tsc",
+        "prepare": "npm run build",
+        "test": "tsx --test tests/*.test.ts tests/**/*.test.ts",
+        "test:single": "tsx --test",
+        "clean": "rm -rf dist"
+    },
+    "keywords": [
+        "channels",
+        "messaging",
+        "unix-socket",
+        "ipc",
+        "fan-out"
+    ],
+    "license": "MIT",
+    "engines": {
+        "node": ">=20.0.0"
+    },
+    "devDependencies": {
+        "@types/node": "^25.2.1",
+        "tsx": "^4.0.0",
+        "typescript": "^5.0.0"
+    },
+    "files": [
+        "dist",
+        "README.md",
+        "LICENSE"
+    ]
+}
