@@ -3,10 +3,10 @@
  *
  * Live-updating widget showing swarm agent status.
  * Uses ctx.ui.setWidget() for a persistent display above the editor.
+ * Flat list grouped by swarm — no hierarchical tree.
  */
 
 import { getSwarmState, type AgentInfo, type AgentStatus } from "../core/state.js";
-import { getIdentity, buildChildrenMap } from "../core/identity.js";
 import { getAgentActivity } from "./activity.js";
 
 // Store ctx reference for dashboard updates triggered outside tool execution
@@ -73,7 +73,7 @@ export function updateDashboard(ctx?: any): void {
     if (done === total) statusText += " ✓";
     c.ui.setStatus("swarm", statusText);
 
-    // Widget: tree view using hierarchical codes for nesting
+    // Widget: flat list grouped by swarm
     const widgetLines: string[] = [];
 
     widgetLines.push(`🐝 Swarm — ${done}/${total} complete`);
@@ -81,16 +81,21 @@ export function updateDashboard(ctx?: any): void {
         widgetLines.push(`   task: ${state.taskDirPath}`);
     }
 
-    // Build tree from hierarchical codes
-    const myCode = getIdentity().code;
-    const { children } = buildChildrenMap(agents);
+    // Group agents by swarm
+    const bySwarm = new Map<string, AgentInfo[]>();
+    for (const agent of agents) {
+        if (!bySwarm.has(agent.swarm)) bySwarm.set(agent.swarm, []);
+        bySwarm.get(agent.swarm)!.push(agent);
+    }
 
-    // Recursive tree render
-    function renderNode(code: string, indent: string): void {
-        const kids = children.get(code) || [];
-        for (let i = 0; i < kids.length; i++) {
-            const agent = kids[i];
-            const isLast = i === kids.length - 1;
+    for (const [swarmName, swarmAgents] of bySwarm) {
+        if (bySwarm.size > 1) {
+            widgetLines.push(`   ─ ${swarmName} ─`);
+        }
+
+        for (let i = 0; i < swarmAgents.length; i++) {
+            const agent = swarmAgents[i];
+            const isLast = i === swarmAgents.length - 1;
             const branch = isLast ? "└ " : "├ ";
             const icon = statusIcon(agent.status);
             const role = agent.role === "coordinator" ? "co" : "ag";
@@ -105,7 +110,6 @@ export function updateDashboard(ctx?: any): void {
                     ? agent.blockerDescription.slice(0, 50) + "…"
                     : agent.blockerDescription;
             } else if (agent.progressPhase || agent.progressPercent != null || agent.progressDetail) {
-                // Show progress info if available
                 const parts: string[] = [];
                 if (agent.progressPhase) parts.push(agent.progressPhase);
                 if (agent.progressPercent != null) parts.push(`${agent.progressPercent}%`);
@@ -124,15 +128,9 @@ export function updateDashboard(ctx?: any): void {
                 }
             }
 
-            widgetLines.push(`${indent}${branch}${icon} ${agent.name} (${role}) ${detail}`);
-
-            // Recurse into this agent's children
-            const childIndent = indent + (isLast ? "  " : "│ ");
-            renderNode(agent.code, childIndent);
+            widgetLines.push(`   ${branch}${icon} ${agent.name} (${role}) ${detail}`);
         }
     }
-
-    renderNode(myCode, "   ");
 
     c.ui.setWidget("swarm-dashboard", widgetLines, { placement: "belowEditor" });
 }
