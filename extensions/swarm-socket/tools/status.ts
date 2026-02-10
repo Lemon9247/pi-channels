@@ -2,14 +2,13 @@
  * Swarm Status Tool
  *
  * Reports the current state of the swarm: which agents are running,
- * done, blocked, or disconnected.
+ * done, blocked, or disconnected. Flat list grouped by swarm.
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getSwarmState, type AgentInfo } from "../core/state.js";
-import { getIdentity, buildChildrenMap } from "../core/identity.js";
 
 function statusIcon(status: string): string {
     switch (status) {
@@ -62,23 +61,30 @@ export function registerStatusTool(pi: ExtensionAPI): void {
                 report += `**Task dir:** ${state.taskDirPath}\n\n`;
             }
 
-            // Tree view using hierarchical codes
-            const myCode = getIdentity().code;
-            const { children } = buildChildrenMap(agents);
-
-            function renderTree(code: string, indent: string): void {
-                const kids = children.get(code) || [];
-                for (const agent of kids) {
-                    report += `${indent}- ${statusIcon(agent.status)} **${agent.name}** \`${agent.code}\` (${agent.role}, ${agent.swarm}) — ${agent.status}`;
-                    if (agent.doneSummary) report += `\n${indent}  Done: ${agent.doneSummary}`;
-                    if (agent.blockerDescription) report += `\n${indent}  Blocked: ${agent.blockerDescription}`;
-                    report += "\n";
-                    renderTree(agent.code, indent + "  ");
-                }
+            // Group by swarm for display
+            const bySwarm = new Map<string, AgentInfo[]>();
+            for (const agent of agents) {
+                if (!bySwarm.has(agent.swarm)) bySwarm.set(agent.swarm, []);
+                bySwarm.get(agent.swarm)!.push(agent);
             }
 
-            renderTree(myCode, "");
-            report += "\n";
+            for (const [swarmName, swarmAgents] of bySwarm) {
+                report += `### ${swarmName}\n`;
+                for (const agent of swarmAgents) {
+                    report += `- ${statusIcon(agent.status)} **${agent.name}** (${agent.role}) — ${agent.status}`;
+                    if (agent.doneSummary) report += `\n  Done: ${agent.doneSummary}`;
+                    if (agent.blockerDescription) report += `\n  Blocked: ${agent.blockerDescription}`;
+                    if (agent.progressPhase || agent.progressPercent != null || agent.progressDetail) {
+                        const parts: string[] = [];
+                        if (agent.progressPhase) parts.push(agent.progressPhase);
+                        if (agent.progressPercent != null) parts.push(`${agent.progressPercent}%`);
+                        if (agent.progressDetail) parts.push(agent.progressDetail);
+                        report += `\n  Progress: ${parts.join(" — ")}`;
+                    }
+                    report += "\n";
+                }
+                report += "\n";
+            }
 
             return {
                 content: [{ type: "text", text: report }],
