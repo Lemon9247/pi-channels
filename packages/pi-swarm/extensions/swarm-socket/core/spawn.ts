@@ -99,8 +99,10 @@ export function spawnAgent(
     args.push(`Task: ${agentDef.task}`);
 
     // Environment variables for channel connection
+    // Agents subscribe to GENERAL + their own inbox (+ topic if multi-team).
+    // NOT QUEEN_INBOX — queen-bound messages (done/blocker/progress) are for the queen only.
     const inbox = inboxName(agentDef.name);
-    const subscribeChannels = [GENERAL_CHANNEL, QUEEN_INBOX];
+    const subscribeChannels = [GENERAL_CHANNEL];
     if (topicChannel) {
         subscribeChannels.push(topicChannel);
     }
