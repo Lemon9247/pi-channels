@@ -12,7 +12,7 @@ import * as crypto from "node:crypto";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import type { Message } from "../../../../agent-channels/dist/index.js";
+import type { Message } from "agent-channels";
 import {
     createSwarmChannelGroup,
     connectToMultiple,

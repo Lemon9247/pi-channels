@@ -13,7 +13,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import type { ChannelClient, Message } from "../../../../agent-channels/dist/index.js";
+import type { ChannelClient, Message } from "agent-channels";
 import { getParentClients } from "../core/state.js";
 import { getIdentity } from "../core/identity.js";
 import { GENERAL_CHANNEL, QUEEN_INBOX, ENV, inboxName } from "../core/channels.js";

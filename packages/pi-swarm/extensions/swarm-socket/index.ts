@@ -20,7 +20,7 @@ import { registerStatusTool } from "./tools/status.js";
 import { registerAgentTools } from "./tools/agent.js";
 import { setupNotifications } from "./ui/notifications.js";
 import { cleanupSwarm, setParentClients, getParentClients } from "./core/state.js";
-import { GENERAL_CHANNEL } from "./core/channels.js";
+import { GENERAL_CHANNEL, QUEEN_INBOX } from "./core/channels.js";
 import { registerMessageRenderers } from "./ui/renderers.js";
 import { clearDashboard } from "./ui/dashboard.js";
 import { registerSwarmCommand } from "./ui/commands.js";

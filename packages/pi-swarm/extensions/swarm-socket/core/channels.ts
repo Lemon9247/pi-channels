@@ -6,7 +6,7 @@
  */
 
 import * as path from "node:path";
-import { ChannelGroup, ChannelClient, type GroupChannelDef } from "../../../../agent-channels/dist/index.js";
+import { ChannelGroup, ChannelClient, type GroupChannelDef } from "agent-channels";
 
 // ─── Constants ───────────────────────────────────────────────────────
 

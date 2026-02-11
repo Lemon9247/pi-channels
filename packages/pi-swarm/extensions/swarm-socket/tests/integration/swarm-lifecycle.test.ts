@@ -7,7 +7,7 @@
 import { describe, it, after } from "node:test";
 import * as assert from "node:assert/strict";
 import * as fs from "node:fs";
-import { ChannelGroup, ChannelClient } from "../../../../../agent-channels/dist/index.js";
+import { ChannelGroup, ChannelClient } from "agent-channels";
 import {
     createSwarmChannelGroup,
     connectToChannel,

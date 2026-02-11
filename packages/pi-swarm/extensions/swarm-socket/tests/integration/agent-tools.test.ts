@@ -7,7 +7,7 @@
 
 import { describe, it, after, beforeEach, afterEach } from "node:test";
 import * as assert from "node:assert/strict";
-import { ChannelGroup, ChannelClient, type Message } from "../../../../../agent-channels/dist/index.js";
+import { ChannelGroup, ChannelClient, type Message } from "agent-channels";
 import {
     createSwarmChannelGroup,
     connectToChannel,

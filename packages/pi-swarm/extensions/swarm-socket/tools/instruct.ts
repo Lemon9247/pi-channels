@@ -8,7 +8,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import type { Message } from "../../../../agent-channels/dist/index.js";
+import type { Message } from "agent-channels";
 import { getSwarmState, getParentClients } from "../core/state.js";
 import { getIdentity } from "../core/identity.js";
 import { inboxName, GENERAL_CHANNEL, QUEEN_INBOX } from "../core/channels.js";

@@ -14,7 +14,7 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import type { ChannelClient, Message } from "../../../../agent-channels/dist/index.js";
+import type { ChannelClient, Message } from "agent-channels";
 import { getIdentity } from "../core/identity.js";
 
 export function setupNotifications(pi: ExtensionAPI, clients: Map<string, ChannelClient>): void {
