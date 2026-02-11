@@ -35,7 +35,7 @@ describe("allOrCleanup", () => {
         assert.deepEqual(cleaned.sort(), [10, 30]);
     });
 
-    it("throws the first error", async () => {
+    it("throws the first error (by input order)", async () => {
         await assert.rejects(
             () => allOrCleanup(
                 [1, 2],
@@ -46,11 +46,7 @@ describe("allOrCleanup", () => {
                 },
                 () => {},
             ),
-            (err: Error) => {
-                // Should be one of the errors (Promise.allSettled order)
-                assert.ok(err.message === "first" || err.message === "second");
-                return true;
-            },
+            { message: "first" },
         );
     });
 

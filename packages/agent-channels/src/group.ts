@@ -63,6 +63,13 @@ export class ChannelGroup {
             this.channelDefs,
             (def) => this.startChannel(def),
             (channel) => {
+                // Remove from this.channels (startChannel adds as side effect)
+                for (const [name, ch] of this.channels) {
+                    if (ch === channel) {
+                        this.channels.delete(name);
+                        break;
+                    }
+                }
                 try { channel.stop(); } catch { /* best effort */ }
             },
         );

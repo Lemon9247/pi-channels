@@ -163,11 +163,17 @@ export async function gracefulShutdown(
 /**
  * Check if a PID is still alive and belongs to one of our agent processes.
  * Prevents killing a recycled PID that now belongs to an unrelated process.
+ *
+ * Checks both process.pid match AND that Node.js hasn't observed the exit
+ * (exitCode/signalCode null means still running from Node's perspective).
  */
 function isOurProcess(pid: number, agents: Map<string, AgentInfo>): boolean {
-    // Check if the PID still matches a tracked agent process
     for (const agent of agents.values()) {
         if (agent.process?.pid === pid) {
+            // If Node.js already saw the exit, PID may have been recycled
+            if (agent.process.exitCode !== null || agent.process.signalCode !== null) {
+                return false;
+            }
             try {
                 // signal 0 checks existence without killing
                 process.kill(pid, 0);

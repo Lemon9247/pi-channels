@@ -36,11 +36,19 @@ export default function (pi: ExtensionAPI) {
         const inboxChannel = getInboxChannel();
         const subscribeChannels = getSubscribeChannels();
 
-        // Build list of channels to connect to
+        // Build list of channels to connect to.
+        // Subscribe channels = channels we listen on for notifications.
+        // We also connect to QUEEN_INBOX for sending (done/blocker/progress)
+        // but DON'T pass it to setupNotifications — agents shouldn't receive
+        // queen-bound messages from other agents (C1 fix).
         const channelNames: string[] = [];
         if (inboxChannel) channelNames.push(inboxChannel);
         for (const ch of subscribeChannels) {
             if (!channelNames.includes(ch)) channelNames.push(ch);
+        }
+        // Connect for sending only — not in subscribeChannels
+        if (!channelNames.includes(QUEEN_INBOX)) {
+            channelNames.push(QUEEN_INBOX);
         }
 
         pi.on("session_start", async (_event, ctx) => {
@@ -48,8 +56,12 @@ export default function (pi: ExtensionAPI) {
                 const clients = await connectToMultiple(channelGroupPath, channelNames);
                 setParentClients(clients);
 
-                // Set up incoming message handler
-                setupNotifications(pi, clients);
+                // Set up notifications only on subscribe channels,
+                // NOT on QUEEN_INBOX (agents shouldn't process queen-bound traffic)
+                const notifyClients = new Map(
+                    [...clients].filter(([name]) => name !== QUEEN_INBOX),
+                );
+                setupNotifications(pi, notifyClients);
 
                 // Send registration message so queen knows we're running
                 // Send to both QUEEN_INBOX (primary) and GENERAL (fallback)

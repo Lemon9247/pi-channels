@@ -18,7 +18,7 @@ import * as path from "node:path";
 import { buildSystemPrompt } from "./prompts.js";
 import { type AgentConfig } from "./agents.js";
 import type { AgentFiles } from "./scaffold.js";
-import { ENV, inboxName, GENERAL_CHANNEL, QUEEN_INBOX } from "./channels.js";
+import { ENV, inboxName, GENERAL_CHANNEL } from "./channels.js";
 
 export function writePromptToTempFile(name: string, prompt: string): { dir: string; filePath: string } {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-swarm-"));

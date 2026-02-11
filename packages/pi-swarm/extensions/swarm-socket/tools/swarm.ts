@@ -217,27 +217,30 @@ function handleQueenMessage(
 
     switch (type) {
         case "register": {
-            updateAgentStatus(senderName, "running");
-            pushSyntheticEvent(senderName, "message", `registered (${msg.data.role || "agent"})`);
-            updateDashboard(ctx);
+            if (updateAgentStatus(senderName, "running")) {
+                pushSyntheticEvent(senderName, "message", `registered (${msg.data.role || "agent"})`);
+                updateDashboard(ctx);
+            }
             break;
         }
 
         case "done": {
             const summary = (msg.data.summary as string) || "";
-            updateAgentStatus(senderName, "done", { doneSummary: summary });
-            state.onAgentDone?.(senderName, summary);
-            updateDashboard(ctx);
-            relayToParent("done", senderName, agentMap.get(senderName), { summary });
+            if (updateAgentStatus(senderName, "done", { doneSummary: summary })) {
+                state.onAgentDone?.(senderName, summary);
+                updateDashboard(ctx);
+                relayToParent("done", senderName, agentMap.get(senderName), { summary });
+            }
             break;
         }
 
         case "blocker": {
             const description = (msg.data.description as string) || "";
-            updateAgentStatus(senderName, "blocked", { blockerDescription: description });
-            state.onBlocker?.(senderName, description);
-            updateDashboard(ctx);
-            relayToParent("blocked", senderName, agentMap.get(senderName), { description });
+            if (updateAgentStatus(senderName, "blocked", { blockerDescription: description })) {
+                state.onBlocker?.(senderName, description);
+                updateDashboard(ctx);
+                relayToParent("blocked", senderName, agentMap.get(senderName), { description });
+            }
             break;
         }
 

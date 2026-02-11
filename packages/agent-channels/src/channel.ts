@@ -126,7 +126,9 @@ export class Channel extends EventEmitter {
      */
     broadcast(msg: Message): void {
         const frame = encode(msg);
-        for (const client of this.clients.values()) {
+        // Snapshot to avoid map mutation during iteration (same as fanOut)
+        const snapshot = Array.from(this.clients.values());
+        for (const client of snapshot) {
             this.writeToClient(client, frame);
         }
     }

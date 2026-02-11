@@ -70,7 +70,9 @@ export class TcpBridgeServer extends EventEmitter implements Bridge {
         // Forward channel messages to all TCP clients
         client.on("message", (msg: Message) => {
             const frame = encode(msg);
-            for (const remote of this.remoteClients.values()) {
+            // Snapshot to avoid map mutation during iteration (W1 pattern)
+            const snapshot = Array.from(this.remoteClients.values());
+            for (const remote of snapshot) {
                 this.writeToRemote(remote, frame);
             }
         });
@@ -165,7 +167,9 @@ export class TcpBridgeServer extends EventEmitter implements Bridge {
                 // Fan out to other TCP clients (the channel won't echo back
                 // to the bridge's own client, so we relay directly)
                 const outFrame = encode(msg);
-                for (const other of this.remoteClients.values()) {
+                // Snapshot to avoid map mutation during iteration (W1 pattern)
+                const snapshot = Array.from(this.remoteClients.values());
+                for (const other of snapshot) {
                     if (other.id !== clientId) {
                         this.writeToRemote(other, outFrame);
                     }

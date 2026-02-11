@@ -7,6 +7,7 @@
  *
  * If any operation fails, all successfully-completed results are rolled
  * back using the provided cleanup function before the error is thrown.
+ * Cleanup can be sync or async — async cleanups are awaited.
  *
  * @param items Items to process
  * @param operation Async operation for each item
@@ -16,9 +17,8 @@
 export async function allOrCleanup<T, R>(
     items: T[],
     operation: (item: T) => Promise<R>,
-    cleanup: (result: R) => void,
+    cleanup: (result: R) => void | Promise<void>,
 ): Promise<R[]> {
-    // Track individual results with their completion status
     const settled = await Promise.allSettled(items.map(operation));
 
     const successes: R[] = [];
@@ -33,14 +33,16 @@ export async function allOrCleanup<T, R>(
     }
 
     if (firstError) {
-        // Roll back all successful results
-        for (const result of successes) {
-            try {
-                cleanup(result);
-            } catch {
-                // Best effort cleanup — don't mask the original error
-            }
-        }
+        // Roll back all successful results — await async cleanups
+        await Promise.allSettled(
+            successes.map(async (result) => {
+                try {
+                    await cleanup(result);
+                } catch {
+                    // Best effort cleanup — don't mask the original error
+                }
+            }),
+        );
         throw firstError;
     }
 

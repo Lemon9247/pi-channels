@@ -115,6 +115,52 @@ describe("shouldProcessMessage", () => {
         });
     });
 
+    describe("target (to) filtering", () => {
+        it("rejects messages addressed to another agent", () => {
+            assert.equal(
+                shouldProcessMessage(
+                    msg({ type: "instruct", from: "queen", to: "a2" }),
+                    "a1",
+                    "s1",
+                ),
+                false,
+            );
+        });
+
+        it("accepts messages addressed to self", () => {
+            assert.equal(
+                shouldProcessMessage(
+                    msg({ type: "instruct", from: "queen", to: "a1" }),
+                    "a1",
+                    "s1",
+                ),
+                true,
+            );
+        });
+
+        it("accepts messages with no to field (broadcasts)", () => {
+            assert.equal(
+                shouldProcessMessage(
+                    msg({ type: "nudge", from: "a2" }),
+                    "a1",
+                    "s1",
+                ),
+                true,
+            );
+        });
+
+        it("applies to all message types", () => {
+            assert.equal(
+                shouldProcessMessage(
+                    msg({ type: "blocker", from: "a2", to: "a3" }),
+                    "a1",
+                    "s1",
+                ),
+                false,
+            );
+        });
+    });
+
     describe("combined filters", () => {
         it("self-filter takes priority over swarm match", () => {
             assert.equal(
