@@ -170,7 +170,10 @@ export class Channel extends EventEmitter {
 
     private fanOut(msg: Message, senderId: string): void {
         const frame = encode(msg);
-        for (const client of this.clients.values()) {
+        // Snapshot client list before iteration (W1 fix).
+        // writeToClient can trigger disconnectClient which modifies the map.
+        const snapshot = Array.from(this.clients.values());
+        for (const client of snapshot) {
             if (!this.echoToSender && client.id === senderId) {
                 continue;
             }

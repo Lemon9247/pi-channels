@@ -252,6 +252,8 @@ export class TcpBridgeClient extends EventEmitter implements Bridge {
     private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     private reconnectAttempt = 0;
     private stopping = false;
+    /** Track in-flight connectTcp() socket for cleanup on stop() (C4 fix). */
+    private pendingSocket: net.Socket | null = null;
 
     constructor(options: TcpBridgeClientOptions) {
         super();
@@ -314,6 +316,14 @@ export class TcpBridgeClient extends EventEmitter implements Bridge {
             this.reconnectTimer = null;
         }
 
+        // Clean up in-flight connection attempt (C4 fix)
+        if (this.pendingSocket) {
+            if (!this.pendingSocket.destroyed) {
+                this.pendingSocket.destroy();
+            }
+            this.pendingSocket = null;
+        }
+
         // Disconnect TCP
         if (this.tcpSocket) {
             this.tcpSocket.removeAllListeners();
@@ -336,8 +346,20 @@ export class TcpBridgeClient extends EventEmitter implements Bridge {
             let settled = false; // H2 fix: track whether promise is resolved/rejected
             const socket = net.connect(this.port, this.host);
 
+            // Track in-flight socket so stop() can clean it up (C4 fix)
+            this.pendingSocket = socket;
+
             socket.on("connect", () => {
                 settled = true;
+                this.pendingSocket = null;
+
+                // If stop() was called while we were connecting, destroy immediately
+                if (this.stopping) {
+                    socket.destroy();
+                    reject(new Error("Bridge stopped during connect"));
+                    return;
+                }
+
                 this.tcpSocket = socket;
                 this.tcpDecoder.reset();
                 this.reconnectAttempt = 0;
@@ -367,6 +389,7 @@ export class TcpBridgeClient extends EventEmitter implements Bridge {
             socket.on("close", () => {
                 const wasConnected = this.tcpSocket !== null; // C2 fix
                 this.tcpSocket = null;
+                this.pendingSocket = null;
                 this.tcpDecoder.reset();
 
                 // Only reconnect if we were previously connected (not on initial failure)

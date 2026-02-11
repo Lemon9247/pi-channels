@@ -102,12 +102,12 @@ describe("state", () => {
             assert.equal(VALID_TRANSITIONS.disconnected.size, 0);
         });
 
-        it("starting can transition to running, crashed, disconnected", () => {
+        it("starting can transition to running, done, blocked, crashed, disconnected", () => {
             assert.ok(isValidTransition("starting", "running"));
+            assert.ok(isValidTransition("starting", "done"));
+            assert.ok(isValidTransition("starting", "blocked"));
             assert.ok(isValidTransition("starting", "crashed"));
             assert.ok(isValidTransition("starting", "disconnected"));
-            assert.ok(!isValidTransition("starting", "done"));
-            assert.ok(!isValidTransition("starting", "blocked"));
         });
 
         it("running can transition to done, blocked, crashed, disconnected", () => {

@@ -6,7 +6,7 @@
  */
 
 import * as path from "node:path";
-import { ChannelGroup, ChannelClient, type GroupChannelDef } from "agent-channels";
+import { ChannelGroup, ChannelClient, type GroupChannelDef, allOrCleanup } from "agent-channels";
 
 // ─── Constants ───────────────────────────────────────────────────────
 
@@ -130,6 +130,7 @@ export async function connectToChannel(
 
 /**
  * Connect to multiple channels in a group.
+ * Rolls back (disconnects) all successful connections if any fail (C3 fix).
  *
  * @param groupDir Path to the channel group directory
  * @param channelNames Channel names to connect to
@@ -139,12 +140,20 @@ export async function connectToMultiple(
     groupDir: string,
     channelNames: string[],
 ): Promise<Map<string, ChannelClient>> {
-    const clients = new Map<string, ChannelClient>();
-    await Promise.all(
-        channelNames.map(async (name) => {
+    const results = await allOrCleanup(
+        channelNames,
+        async (name) => {
             const client = await connectToChannel(groupDir, name);
-            clients.set(name, client);
-        }),
+            return { name, client };
+        },
+        ({ client }) => {
+            try { client.disconnect(); } catch { /* best effort */ }
+        },
     );
+
+    const clients = new Map<string, ChannelClient>();
+    for (const { name, client } of results) {
+        clients.set(name, client);
+    }
     return clients;
 }

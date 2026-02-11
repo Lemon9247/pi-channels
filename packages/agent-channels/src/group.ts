@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { Channel, type ChannelOptions } from "./channel.js";
+import { allOrCleanup } from "./util.js";
 
 export interface GroupChannelDef {
     /** Channel name (becomes <name>.sock in the group directory). */
@@ -56,8 +57,15 @@ export class ChannelGroup {
         // Create group directory
         fs.mkdirSync(this.groupPath, { recursive: true });
 
-        // Start all channels in parallel
-        await Promise.all(this.channelDefs.map((def) => this.startChannel(def)));
+        // Start all channels in parallel with rollback on partial failure (C8 fix).
+        // If channel 3 of 5 fails, channels 1-2 are stopped and cleaned up.
+        await allOrCleanup(
+            this.channelDefs,
+            (def) => this.startChannel(def),
+            (channel) => {
+                try { channel.stop(); } catch { /* best effort */ }
+            },
+        );
 
         this._started = true;
 

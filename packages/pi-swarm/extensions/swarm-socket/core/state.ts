@@ -49,13 +49,16 @@ export interface SwarmState {
  * Key = current status, value = set of allowed next statuses.
  *
  * Transition rules:
- * - starting → running (agent registered), crashed (failed to start), disconnected (process exited)
+ * - starting → running (registered), done (completed fast), blocked, crashed (failed to start), disconnected
  * - running → done (hive_done), blocked (hive_blocker), crashed (timeout/error), disconnected (process exited)
  * - blocked → running (unblocked), done (completed despite blocker), crashed (timeout), disconnected
  * - done/crashed/disconnected → terminal, no transitions out
+ *
+ * starting allows done/blocked because an agent may send hive_done or hive_blocker
+ * before the register message arrives (race condition in fast agents).
  */
 export const VALID_TRANSITIONS: Record<AgentStatus, Set<AgentStatus>> = {
-    starting:      new Set(["running", "crashed", "disconnected"]),
+    starting:      new Set(["running", "done", "blocked", "crashed", "disconnected"]),
     running:       new Set(["done", "blocked", "crashed", "disconnected"]),
     blocked:       new Set(["running", "done", "crashed", "disconnected"]),
     done:          new Set(),
