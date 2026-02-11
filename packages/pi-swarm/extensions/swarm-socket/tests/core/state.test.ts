@@ -1,7 +1,8 @@
 /**
  * Tests for core/state.ts
  *
- * Verifies swarm state management, agent status updates, and cleanup.
+ * Verifies swarm state management, agent status updates,
+ * state machine transitions, and cleanup.
  */
 
 import { describe, it, beforeEach } from "node:test";
@@ -14,8 +15,11 @@ import {
     getParentClients,
     setParentClients,
     cleanupSwarm,
+    isValidTransition,
+    VALID_TRANSITIONS,
     type SwarmState,
     type AgentInfo,
+    type AgentStatus,
 } from "../../core/state.js";
 
 function makeAgent(name: string, overrides?: Partial<AgentInfo>): AgentInfo {
@@ -91,8 +95,48 @@ describe("state", () => {
         });
     });
 
+    describe("state machine", () => {
+        it("terminal states have no valid transitions", () => {
+            assert.equal(VALID_TRANSITIONS.done.size, 0);
+            assert.equal(VALID_TRANSITIONS.crashed.size, 0);
+            assert.equal(VALID_TRANSITIONS.disconnected.size, 0);
+        });
+
+        it("starting can transition to running, crashed, disconnected", () => {
+            assert.ok(isValidTransition("starting", "running"));
+            assert.ok(isValidTransition("starting", "crashed"));
+            assert.ok(isValidTransition("starting", "disconnected"));
+            assert.ok(!isValidTransition("starting", "done"));
+            assert.ok(!isValidTransition("starting", "blocked"));
+        });
+
+        it("running can transition to done, blocked, crashed, disconnected", () => {
+            assert.ok(isValidTransition("running", "done"));
+            assert.ok(isValidTransition("running", "blocked"));
+            assert.ok(isValidTransition("running", "crashed"));
+            assert.ok(isValidTransition("running", "disconnected"));
+            assert.ok(!isValidTransition("running", "starting"));
+        });
+
+        it("blocked can transition to running, done, crashed, disconnected", () => {
+            assert.ok(isValidTransition("blocked", "running"));
+            assert.ok(isValidTransition("blocked", "done"));
+            assert.ok(isValidTransition("blocked", "crashed"));
+            assert.ok(isValidTransition("blocked", "disconnected"));
+            assert.ok(!isValidTransition("blocked", "starting"));
+        });
+
+        it("crashed→running is invalid (the ghost transition)", () => {
+            assert.ok(!isValidTransition("crashed", "running"));
+        });
+
+        it("done→running is invalid", () => {
+            assert.ok(!isValidTransition("done", "running"));
+        });
+    });
+
     describe("updateAgentStatus", () => {
-        it("updates agent status", () => {
+        it("updates agent status for valid transition", () => {
             const agents = new Map<string, AgentInfo>();
             agents.set("a1", makeAgent("a1"));
 
@@ -104,14 +148,67 @@ describe("state", () => {
                 queenClients: new Map(),
             });
 
-            updateAgentStatus("a1", "done", { doneSummary: "completed work" });
+            const result = updateAgentStatus("a1", "done", { doneSummary: "completed work" });
 
+            assert.equal(result, true);
             const agent = getSwarmState()!.agents.get("a1")!;
             assert.equal(agent.status, "done");
             assert.equal(agent.doneSummary, "completed work");
         });
 
-        it("does nothing if agent not found", () => {
+        it("rejects invalid transition (crashed→running)", () => {
+            const agents = new Map<string, AgentInfo>();
+            agents.set("a1", makeAgent("a1", { status: "crashed" }));
+
+            setSwarmState({
+                generation: 0,
+                group: null,
+                groupPath: "/tmp/test",
+                agents,
+                queenClients: new Map(),
+            });
+
+            const result = updateAgentStatus("a1", "running");
+
+            assert.equal(result, false);
+            assert.equal(getSwarmState()!.agents.get("a1")!.status, "crashed");
+        });
+
+        it("rejects invalid transition (done→running)", () => {
+            const agents = new Map<string, AgentInfo>();
+            agents.set("a1", makeAgent("a1", { status: "done" }));
+
+            setSwarmState({
+                generation: 0,
+                group: null,
+                groupPath: "/tmp/test",
+                agents,
+                queenClients: new Map(),
+            });
+
+            const result = updateAgentStatus("a1", "running");
+            assert.equal(result, false);
+            assert.equal(getSwarmState()!.agents.get("a1")!.status, "done");
+        });
+
+        it("allows blocked→running (unblocked)", () => {
+            const agents = new Map<string, AgentInfo>();
+            agents.set("a1", makeAgent("a1", { status: "blocked" }));
+
+            setSwarmState({
+                generation: 0,
+                group: null,
+                groupPath: "/tmp/test",
+                agents,
+                queenClients: new Map(),
+            });
+
+            const result = updateAgentStatus("a1", "running");
+            assert.equal(result, true);
+            assert.equal(getSwarmState()!.agents.get("a1")!.status, "running");
+        });
+
+        it("returns false if agent not found", () => {
             const agents = new Map<string, AgentInfo>();
             agents.set("a1", makeAgent("a1"));
 
@@ -123,8 +220,8 @@ describe("state", () => {
                 queenClients: new Map(),
             });
 
-            updateAgentStatus("nonexistent", "done");
-            // No error thrown
+            const result = updateAgentStatus("nonexistent", "done");
+            assert.equal(result, false);
             assert.equal(getSwarmState()!.agents.get("a1")!.status, "running");
         });
 

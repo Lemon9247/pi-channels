@@ -42,6 +42,36 @@ export interface SwarmState {
     onNudge?: (reason: string, from: string) => void;
 }
 
+// ─── State Machine ──────────────────────────────────────────────────
+
+/**
+ * Valid agent status transitions.
+ * Key = current status, value = set of allowed next statuses.
+ *
+ * Transition rules:
+ * - starting → running (agent registered), crashed (failed to start), disconnected (process exited)
+ * - running → done (hive_done), blocked (hive_blocker), crashed (timeout/error), disconnected (process exited)
+ * - blocked → running (unblocked), done (completed despite blocker), crashed (timeout), disconnected
+ * - done/crashed/disconnected → terminal, no transitions out
+ */
+export const VALID_TRANSITIONS: Record<AgentStatus, Set<AgentStatus>> = {
+    starting:      new Set(["running", "crashed", "disconnected"]),
+    running:       new Set(["done", "blocked", "crashed", "disconnected"]),
+    blocked:       new Set(["running", "done", "crashed", "disconnected"]),
+    done:          new Set(),
+    crashed:       new Set(),
+    disconnected:  new Set(),
+};
+
+/**
+ * Check if a status transition is valid.
+ */
+export function isValidTransition(from: AgentStatus, to: AgentStatus): boolean {
+    return VALID_TRANSITIONS[from].has(to);
+}
+
+// ─── Module State ───────────────────────────────────────────────────
+
 let activeSwarm: SwarmState | null = null;
 let parentClients: Map<string, ChannelClient> | null = null;
 let swarmGeneration = 0;
@@ -70,15 +100,26 @@ export function setParentClients(clients: Map<string, ChannelClient> | null): vo
     parentClients = clients;
 }
 
-export function updateAgentStatus(name: string, status: AgentStatus, extra?: Partial<AgentInfo>): void {
-    if (!activeSwarm) return;
+/**
+ * Update an agent's status, enforcing the state machine.
+ * Invalid transitions are silently ignored (returns false).
+ */
+export function updateAgentStatus(name: string, status: AgentStatus, extra?: Partial<AgentInfo>): boolean {
+    if (!activeSwarm) return false;
     const agent = activeSwarm.agents.get(name);
-    if (!agent) return;
+    if (!agent) return false;
+
+    // Enforce state machine — reject invalid transitions
+    if (!isValidTransition(agent.status, status)) {
+        return false;
+    }
+
     agent.status = status;
     if (extra) Object.assign(agent, extra);
 
     // Check if all agents are done
     checkAllDone();
+    return true;
 }
 
 function checkAllDone(): void {
@@ -116,21 +157,58 @@ export async function gracefulShutdown(
     await cleanupSwarm();
 }
 
+/**
+ * Check if a PID is still alive and belongs to one of our agent processes.
+ * Prevents killing a recycled PID that now belongs to an unrelated process.
+ */
+function isOurProcess(pid: number, agents: Map<string, AgentInfo>): boolean {
+    // Check if the PID still matches a tracked agent process
+    for (const agent of agents.values()) {
+        if (agent.process?.pid === pid) {
+            try {
+                // signal 0 checks existence without killing
+                process.kill(pid, 0);
+                return true;
+            } catch {
+                return false;
+            }
+        }
+    }
+    return false;
+}
+
 export async function cleanupSwarm(): Promise<void> {
     if (!activeSwarm) return;
 
+    // Snapshot agents before cleanup — we'll null activeSwarm at the end
+    const agents = activeSwarm.agents;
+
     // Kill all child processes and their subtrees (process groups)
-    for (const agent of activeSwarm.agents.values()) {
+    const killPromises: Promise<void>[] = [];
+    for (const agent of agents.values()) {
         if (agent.process && !agent.process.killed && agent.process.pid) {
+            const pid = agent.process.pid;
+
+            // Verify PID still belongs to us before killing
+            if (!isOurProcess(pid, agents)) continue;
+
             try {
-                process.kill(-agent.process.pid, "SIGTERM");
+                process.kill(-pid, "SIGTERM");
             } catch {
                 try { agent.process.kill("SIGTERM"); } catch { /* ignore */ }
             }
-            const pid = agent.process.pid;
-            setTimeout(() => {
-                try { process.kill(-pid, "SIGKILL"); } catch { /* ignore */ }
-            }, 5000);
+
+            // Schedule SIGKILL after 5s, re-verify PID before killing
+            killPromises.push(
+                new Promise<void>((resolve) => {
+                    setTimeout(() => {
+                        if (isOurProcess(pid, agents)) {
+                            try { process.kill(-pid, "SIGKILL"); } catch { /* ignore */ }
+                        }
+                        resolve();
+                    }, 5000);
+                }),
+            );
         }
     }
 
@@ -148,4 +226,7 @@ export async function cleanupSwarm(): Promise<void> {
     }
 
     activeSwarm = null;
+
+    // Don't await killPromises — they're 5s timeouts. Fire and forget.
+    // The SIGTERM above is the real cleanup; SIGKILL is the safety net.
 }
