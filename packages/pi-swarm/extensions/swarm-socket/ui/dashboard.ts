@@ -8,18 +8,11 @@
 
 import { getSwarmState, type AgentInfo, type AgentStatus } from "../core/state.js";
 import { getAgentActivity, getAgentUsage, getAggregateUsage } from "./activity.js";
-import { formatUsageStats } from "./format.js";
+import { formatTokens } from "./format.js";
 
 // Store ctx reference for dashboard updates triggered outside tool execution
 let dashboardCtx: any = null;
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
-
-/** Compact token count for widget display (e.g. "12k", "1.2M"). */
-function compactTokens(count: number): string {
-    if (count < 1000) return count.toString();
-    if (count < 1000000) return `${Math.round(count / 1000)}k`;
-    return `${(count / 1000000).toFixed(1)}M`;
-}
 
 function statusIcon(status: AgentStatus): string {
     switch (status) {
@@ -116,7 +109,7 @@ export function updateDashboard(ctx?: any): void {
             if (usage.turns) {
                 const parts: string[] = [];
                 parts.push(`${usage.turns}t`);
-                if (usage.input) parts.push(`↑${compactTokens(usage.input)}`);
+                if (usage.input) parts.push(`↑${formatTokens(usage.input)}`);
                 if (usage.cost) parts.push(`$${usage.cost.toFixed(2)}`);
                 usageStr = parts.join(" ");
             }

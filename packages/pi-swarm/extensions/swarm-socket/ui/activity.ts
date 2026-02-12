@@ -34,7 +34,8 @@ function emptyUsage(): UsageStats {
 }
 
 export function getAgentActivity(name: string): ActivityEvent[] {
-    return agentActivity.get(name) || [];
+    const events = agentActivity.get(name);
+    return events ? [...events] : [];
 }
 
 export function getAllActivity(): Map<string, ActivityEvent[]> {
@@ -42,7 +43,8 @@ export function getAllActivity(): Map<string, ActivityEvent[]> {
 }
 
 export function getAgentUsage(name: string): UsageStats {
-    return agentUsage.get(name) || emptyUsage();
+    const stats = agentUsage.get(name);
+    return stats ? { ...stats } : emptyUsage();
 }
 
 export function getAggregateUsage(): UsageStats {
@@ -53,7 +55,7 @@ export function getAggregateUsage(): UsageStats {
         totals.cacheRead += usage.cacheRead;
         totals.cacheWrite += usage.cacheWrite;
         totals.cost += usage.cost;
-        totals.turns = (totals.turns ?? 0) + (usage.turns ?? 0);
+        totals.turns = totals.turns! + (usage.turns ?? 0);
     }
     return totals;
 }
@@ -177,7 +179,7 @@ function parseJsonEvent(agentName: string, line: string): void {
                     stats.cacheWrite += usage.cacheWrite || 0;
                     stats.cost += usage.cost?.total || 0;
                     stats.contextTokens = usage.totalTokens || 0;
-                    stats.turns = (stats.turns ?? 0) + 1;
+                    stats.turns = stats.turns! + 1;
                 }
 
                 // Extract text/thinking from content
@@ -196,7 +198,7 @@ function parseJsonEvent(agentName: string, line: string): void {
                                 timestamp: now,
                                 type: "message",
                                 summary: snippet,
-                                messageText: text,
+                                messageText: text.slice(0, 4096),
                                 tokens,
                             });
                             break; // Only first text part
@@ -248,5 +250,3 @@ export function trackAgentOutput(agentName: string, stdout: NodeJS.ReadableStrea
         }
     });
 }
-
-

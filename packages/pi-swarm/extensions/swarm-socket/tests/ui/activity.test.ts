@@ -184,7 +184,7 @@ describe("activity", () => {
 
         it("thinking event has tokens from usage", async () => {
             const stream = mockStdout([
-                thinkingMessageEndEvent("deep thought", "result", {
+                thinkingMessageEndEvent("deep thought", "result text", {
                     input: 500,
                     output: 100,
                 }),
@@ -192,12 +192,27 @@ describe("activity", () => {
             trackAgentOutput("a1", stream);
             await waitForStream(stream);
 
-            // thinking comes first, then message
             const events = getAgentActivity("a1");
-            assert.ok(events.length >= 1);
-            const thinkingEvent = events.find(e => e.type === "thinking");
-            assert.ok(thinkingEvent);
-            assert.deepEqual(thinkingEvent!.tokens, { input: 500, output: 100 });
+            // thinking comes first, then message (2 events from one message_end)
+            assert.equal(events.length, 2);
+            assert.equal(events[0].type, "thinking");
+            assert.equal(events[0].summary, "deep thought");
+            assert.deepEqual(events[0].tokens, { input: 500, output: 100 });
+            assert.equal(events[1].type, "message");
+            assert.equal(events[1].messageText, "result text");
+            assert.deepEqual(events[1].tokens, { input: 500, output: 100 });
+        });
+
+        it("caps messageText at 4096 chars", async () => {
+            const longText = "x".repeat(8000);
+            const stream = mockStdout([
+                messageEndEvent(longText, { input: 100, output: 50 }),
+            ]);
+            trackAgentOutput("a1", stream);
+            await waitForStream(stream);
+
+            const events = getAgentActivity("a1");
+            assert.equal(events[0].messageText!.length, 4096);
         });
     });
 
@@ -334,6 +349,38 @@ describe("activity", () => {
             assert.equal(events.length, 2);
             assert.equal(events[0].summary, "agent registered");
             assert.equal(events[1].summary, "agent completed");
+        });
+    });
+
+    describe("edge cases", () => {
+        it("non-JSON lines are silently skipped", async () => {
+            const stream = mockStdout([
+                "some debug output",
+                toolStartEvent("bash", { command: "ls" }),
+                "WARNING: something happened",
+                toolEndEvent("bash"),
+            ]);
+            trackAgentOutput("a1", stream);
+            await waitForStream(stream);
+
+            const events = getAgentActivity("a1");
+            assert.equal(events.length, 2);
+            assert.equal(events[0].type, "tool_start");
+            assert.equal(events[1].type, "tool_end");
+        });
+
+        it("tool_execution_start with missing args", async () => {
+            const stream = mockStdout([
+                JSON.stringify({ type: "tool_execution_start", toolName: "custom_tool" }),
+            ]);
+            trackAgentOutput("a1", stream);
+            await waitForStream(stream);
+
+            const events = getAgentActivity("a1");
+            assert.equal(events.length, 1);
+            assert.equal(events[0].toolName, "custom_tool");
+            assert.equal(events[0].toolArgs, undefined);
+            assert.equal(events[0].summary, "custom_tool");
         });
     });
 
