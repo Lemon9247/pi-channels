@@ -253,6 +253,7 @@ function emptyUsage(): UsageStats {
  * @param signal Optional AbortSignal for cancellation
  * @param onUpdate Optional callback fired after each message_end event
  * @param step Optional step number (for chain mode tracking)
+ * @param onRawLine Optional callback fired for each raw JSON stdout line (for activity tracking)
  */
 export async function spawnAgentBlocking(
     agentDef: AgentDef,
@@ -261,6 +262,7 @@ export async function spawnAgentBlocking(
     signal?: AbortSignal,
     onUpdate?: OnBlockingUpdate,
     step?: number,
+    onRawLine?: (line: string) => void,
 ): Promise<SingleResult> {
     const resolved = buildAgentArgs(agentDef, knownAgents);
 
@@ -291,6 +293,7 @@ export async function spawnAgentBlocking(
 
             const processLine = (line: string) => {
                 if (!line.trim()) return;
+                onRawLine?.(line);
                 let event: any;
                 try {
                     event = JSON.parse(line);

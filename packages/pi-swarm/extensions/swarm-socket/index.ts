@@ -114,11 +114,10 @@ export default function (pi: ExtensionAPI) {
     });
 
     // Register management tools based on role:
-    // - Queen (no PI_CHANNELS_GROUP): gets swarm + instruct + status
-    // - Coordinator: gets swarm + instruct + status (can spawn sub-agents)
-    // - Agent: gets NONE of these (agents do work, they don't delegate)
+    // - Queen/Coordinator: gets swarm (full) + instruct + status
+    // - Agent: gets swarm (blocking-only mode enforced in execute())
+    registerSwarmTool(pi);
     if (identity.role === "queen" || identity.role === "coordinator") {
-        registerSwarmTool(pi);
         registerInstructTool(pi);
         registerStatusTool(pi);
     }
