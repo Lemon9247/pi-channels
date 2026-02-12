@@ -1,9 +1,8 @@
 /**
  * Tests for core/spawn.ts
  *
- * Tests the shared arg-building logic (buildAgentArgs) which is used by
- * both detached and blocking spawn modes. We can't easily test actual
- * process spawning in unit tests, but we can verify:
+ * Tests the shared arg-building logic (buildAgentArgs). We can't easily
+ * test actual process spawning in unit tests, but we can verify:
  * - Model resolution (inline > agent file > default)
  * - Tool flag assembly
  * - System prompt composition and temp file creation

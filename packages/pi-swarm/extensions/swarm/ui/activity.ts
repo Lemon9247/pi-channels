@@ -95,8 +95,6 @@ export function pushSyntheticEvent(name: string, type: ActivityEvent["type"], su
  * Feed a raw JSON-mode stdout line into the activity store.
  *
  * Public API for activity tracking outside of trackAgentOutput.
- * Used by blocking spawn mode where we don't have a ReadableStream
- * but still want live activity in the store.
  */
 export function feedRawEvent(agentName: string, line: string): void {
     parseJsonEvent(agentName, line);
