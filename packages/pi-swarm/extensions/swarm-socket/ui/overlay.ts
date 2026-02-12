@@ -91,9 +91,11 @@ export class DashboardOverlay implements Component {
         this.theme = opts.theme;
         this.done = opts.done;
 
+        // Always populate agent list on construction so handleInput works immediately
+        this.refreshAgentList();
+
         // Pre-focus on a specific agent if requested
         if (opts.focusAgent) {
-            this.refreshAgentList();
             const idx = this.cachedAgents.findIndex(a => a.name === opts.focusAgent);
             if (idx >= 0) {
                 this.viewMode = "detail";
