@@ -13,6 +13,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { getSwarmState, type AgentInfo, type AgentStatus, cleanupSwarm, gracefulShutdown } from "../core/state.js";
 import { getAgentActivity, clearActivity, type ActivityEvent } from "./activity.js";
 import { clearDashboard } from "./dashboard.js";
+import { openDashboardOverlay } from "./overlay.js";
 import { GENERAL_CHANNEL } from "../core/channels.js";
 import { getIdentity } from "../core/identity.js";
 
@@ -56,6 +57,34 @@ export function registerSwarmCommand(pi: ExtensionAPI): void {
                 return;
             }
 
+            // If we have UI, open the interactive overlay
+            if (ctx.hasUI) {
+                const agentName = args?.trim();
+                let focusAgent: string | undefined;
+
+                if (agentName) {
+                    // Resolve agent name (exact or partial match)
+                    const agent = state.agents.get(agentName);
+                    if (agent) {
+                        focusAgent = agent.name;
+                    } else {
+                        const match = Array.from(state.agents.values()).find(
+                            a => a.name.includes(agentName)
+                        );
+                        if (match) {
+                            focusAgent = match.name;
+                        } else {
+                            ctx.ui.notify(`Agent "${agentName}" not found.`, "warning");
+                            return;
+                        }
+                    }
+                }
+
+                openDashboardOverlay(ctx, focusAgent);
+                return;
+            }
+
+            // Fallback: text output for non-interactive contexts
             const agentName = args?.trim();
 
             if (agentName) {

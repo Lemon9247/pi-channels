@@ -24,6 +24,7 @@ import { GENERAL_CHANNEL, QUEEN_INBOX } from "./core/channels.js";
 import { registerMessageRenderers } from "./ui/renderers.js";
 import { clearDashboard } from "./ui/dashboard.js";
 import { registerSwarmCommand } from "./ui/commands.js";
+import { openDashboardOverlay } from "./ui/overlay.js";
 
 export default function (pi: ExtensionAPI) {
     // Initialize identity from environment variables
@@ -103,6 +104,14 @@ export default function (pi: ExtensionAPI) {
 
     // Register /swarm command (interactive dashboard overlay)
     registerSwarmCommand(pi);
+
+    // Register Ctrl+H keybind to toggle the dashboard overlay
+    pi.registerShortcut("ctrl+h", {
+        description: "Toggle agent dashboard overlay",
+        handler: async (ctx) => {
+            openDashboardOverlay(ctx);
+        },
+    });
 
     // Register management tools based on role:
     // - Queen (no PI_CHANNELS_GROUP): gets swarm + instruct + status
