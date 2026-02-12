@@ -113,11 +113,10 @@ export default function (pi: ExtensionAPI) {
         },
     });
 
-    // Register management tools based on role:
-    // - Queen/Coordinator: gets swarm (full) + instruct + status
-    // - Agent: gets swarm (blocking-only mode enforced in execute())
-    registerSwarmTool(pi);
+    // Register management tools — only queen and coordinator get swarm/instruct/status.
+    // Agents don't get the swarm tool at all (no blocking mode, no sub-spawning).
     if (identity.role === "queen" || identity.role === "coordinator") {
+        registerSwarmTool(pi);
         registerInstructTool(pi);
         registerStatusTool(pi);
     }
