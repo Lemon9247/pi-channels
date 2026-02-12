@@ -73,6 +73,9 @@ export class DashboardOverlay implements Component, Focusable {
         this.theme = opts.theme;
         this.done = opts.done;
 
+        // Switch to alternate screen buffer to isolate from chat scroll
+        process.stdout.write("\x1b[?1049h");
+
         this.refreshAgentList();
 
         if (opts.focusAgent) {
@@ -90,6 +93,8 @@ export class DashboardOverlay implements Component, Focusable {
 
     dispose(): void {
         this.stopRefresh();
+        // Restore main screen buffer
+        process.stdout.write("\x1b[?1049l");
     }
 
     invalidate(): void {
