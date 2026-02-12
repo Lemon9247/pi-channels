@@ -19,6 +19,15 @@ import { formatTokens, formatUsageStats, statusIcon, formatAge } from "./format.
 import { getIdentity } from "../core/identity.js";
 import { inboxName, GENERAL_CHANNEL } from "../core/channels.js";
 
+// ─── Dashboard Open State ───────────────────────────────────────────
+
+let dashboardOpen = false;
+
+/** Returns true when the dashboard is open and notifications should be buffered. */
+export function isDashboardOpen(): boolean {
+    return dashboardOpen;
+}
+
 // ─── Types ──────────────────────────────────────────────────────────
 
 type AgentStatus = "running" | "starting" | "done" | "blocked" | "crashed" | "disconnected";
@@ -72,9 +81,7 @@ export class DashboardOverlay implements Component, Focusable {
         this.tui = opts.tui;
         this.theme = opts.theme;
         this.done = opts.done;
-
-        // Switch to alternate screen buffer to isolate from chat scroll
-        process.stdout.write("\x1b[?1049h");
+        dashboardOpen = true;
 
         this.refreshAgentList();
 
@@ -93,8 +100,7 @@ export class DashboardOverlay implements Component, Focusable {
 
     dispose(): void {
         this.stopRefresh();
-        // Restore main screen buffer
-        process.stdout.write("\x1b[?1049l");
+        dashboardOpen = false;
     }
 
     invalidate(): void {

@@ -9,6 +9,7 @@
 import { getSwarmState, type AgentInfo } from "../core/state.js";
 import { getAgentActivity, getAgentUsage, getAggregateUsage } from "./activity.js";
 import { formatTokens, statusIcon } from "./format.js";
+import { isDashboardOpen } from "./overlay.js";
 
 // Store ctx reference for dashboard updates triggered outside tool execution
 let dashboardCtx: any = null;
@@ -34,6 +35,10 @@ export function updateDashboard(ctx?: any): void {
     if (ctx) dashboardCtx = ctx;
     const c = ctx || dashboardCtx;
     if (!c || !c.hasUI) return;
+
+    // Skip widget/status updates while full-screen dashboard is open —
+    // the widget is invisible anyway and the renders cause scroll corruption.
+    if (isDashboardOpen()) return;
 
     const state = getSwarmState();
     if (!state) {

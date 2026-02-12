@@ -36,6 +36,7 @@ import { scaffoldTaskDir, scaffoldCoordinatorSubDir, type ScaffoldResult } from 
 import { spawnAgent, spawnAgentBlocking, type AgentDef, type SingleResult } from "../core/spawn.js";
 import { discoverAgents, type AgentConfig, type AgentScope } from "../core/agents.js";
 import { updateDashboard } from "../ui/dashboard.js";
+import { isDashboardOpen } from "../ui/overlay.js";
 import {
     trackAgentOutput, clearActivity, pushSyntheticEvent, getAgentActivity,
     feedRawEvent,
@@ -699,7 +700,44 @@ function handleQueenMessage(
     }
 }
 
+// ─── Notification Buffering ─────────────────────────────────────────
+// When the dashboard is open, buffer pi.sendMessage calls so they don't
+// cause terminal scroll that corrupts the dashboard render.
+
+type BufferedMessage = {
+    message: Parameters<ExtensionAPI["sendMessage"]>[0];
+    options?: Parameters<ExtensionAPI["sendMessage"]>[1];
+};
+
+const messageBuffer: BufferedMessage[] = [];
+let flushInterval: ReturnType<typeof setInterval> | null = null;
+
+function bufferedSendMessage(
+    pi: ExtensionAPI,
+    message: BufferedMessage["message"],
+    options?: BufferedMessage["options"],
+): void {
+    if (isDashboardOpen()) {
+        messageBuffer.push({ message, options });
+        return;
+    }
+    pi.sendMessage(message, options);
+}
+
+function startBufferFlush(pi: ExtensionAPI): void {
+    if (flushInterval) return;
+    flushInterval = setInterval(() => {
+        if (!isDashboardOpen() && messageBuffer.length > 0) {
+            const pending = messageBuffer.splice(0);
+            for (const { message, options } of pending) {
+                pi.sendMessage(message, options);
+            }
+        }
+    }, 500);
+}
+
 export function registerSwarmTool(pi: ExtensionAPI): void {
+    startBufferFlush(pi);
     pi.registerTool({
         name: "swarm",
         label: "Swarm",
@@ -937,7 +975,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
 
             state.onAllDone = () => {
                 if (getSwarmGeneration() !== gen) return;
-                pi.sendMessage(
+                bufferedSendMessage(pi,
                     {
                         customType: "swarm-complete",
                         content:
@@ -953,7 +991,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
 
             state.onBlocker = (agentName, description) => {
                 if (getSwarmGeneration() !== gen) return;
-                pi.sendMessage(
+                bufferedSendMessage(pi,
                     {
                         customType: "swarm-blocker",
                         content: `⚠️ **Agent ${agentName} is blocked:** ${description}\n\nUse \`swarm_instruct\` to help, or check the hive-mind file.`,
@@ -966,7 +1004,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
 
             state.onNudge = (reason, from) => {
                 if (getSwarmGeneration() !== gen) return;
-                pi.sendMessage(
+                bufferedSendMessage(pi,
                     {
                         customType: "swarm-nudge",
                         content: `🔔 **${from}** updated the hive-mind: ${reason}`,
@@ -1045,7 +1083,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                             }
 
                             // Active interrupt to queen
-                            pi.sendMessage(
+                            bufferedSendMessage(pi,
                                 {
                                     customType: "swarm-blocker",
                                     content: crashInfo,
@@ -1080,7 +1118,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                         } catch { /* best effort */ }
                     }
 
-                    pi.sendMessage(
+                    bufferedSendMessage(pi,
                         {
                             customType: "swarm-blocker",
                             content: `💀 **${agentDef.name}** failed to start: ${err.message}`,
@@ -1104,7 +1142,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                 for (const agent of current.agents.values()) {
                     if (agent.status === "starting") {
                         updateAgentStatus(agent.name, "crashed");
-                        pi.sendMessage(
+                        bufferedSendMessage(pi,
                             {
                                 customType: "swarm-blocker",
                                 content: `💀 **${agent.name}** failed to register within 30s — marked as crashed.`,
