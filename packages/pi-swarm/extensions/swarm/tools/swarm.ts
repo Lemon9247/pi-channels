@@ -109,7 +109,7 @@ export function shouldBlock(params: {
     if (params.blocking !== undefined) return params.blocking;
     // Chain mode is always blocking
     if (params.chain && params.chain.length > 0) return true;
-    // 1 agent without taskDir → blocking (subagent-style)
+    // 1 agent without taskDir → blocking (single-agent mode)
     if (params.agents.length === 1 && !params.taskDir) return true;
     // 2+ agents → async (swarm-style)
     return false;

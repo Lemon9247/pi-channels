@@ -8,7 +8,7 @@
  * - **Detached** (spawnAgent): background process with channel coordination,
  *   returns immediately. Used by the swarm tool.
  * - **Blocking** (spawnAgentBlocking): foreground process, reads JSON stdout
- *   line by line, returns structured result on exit. Used by the subagent tool.
+ *   line by line, returns structured result on exit. Used by blocking swarm mode.
  *
  * Both modes share arg-building logic via buildAgentArgs().
  */
@@ -232,7 +232,7 @@ export function spawnAgent(
     return { process: proc, tmpDir: resolved.tmpDir };
 }
 
-// ─── Blocking Spawn (Subagent) ───────────────────────────────────────
+// ─── Blocking Spawn ─────────────────────────────────────────────────
 
 function emptyUsage(): UsageStats {
     return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 };
@@ -245,7 +245,7 @@ function emptyUsage(): UsageStats {
  * and usage stats. The returned Promise resolves when the process exits.
  *
  * Does NOT set channel env vars or append coordination prompts — this is
- * for isolated single-agent execution (subagent tool).
+ * for isolated single-agent execution (blocking swarm mode).
  *
  * @param agentDef Agent definition
  * @param defaultCwd Working directory if not specified in agentDef
