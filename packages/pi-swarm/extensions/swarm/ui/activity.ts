@@ -161,7 +161,9 @@ function parseJsonEvent(agentName: string, line: string): void {
             const toolName = event.toolName || "unknown";
             const isError = !!event.isError;
             const summary = isError ? `✗ ${toolName} failed` : `✓ ${toolName}`;
-            const toolResult = event.result != null ? String(event.result) : undefined;
+            const toolResult = event.result != null
+                ? (typeof event.result === "string" ? event.result : JSON.stringify(event.result, null, 2))
+                : undefined;
 
             pushEvent(agentName, {
                 timestamp: now,

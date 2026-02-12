@@ -418,12 +418,22 @@ export class DashboardOverlay implements Component, Focusable {
         // Instruct input bar
         if (this.inputActive) {
             lines.push(this.row(t.fg("border", " " + "─".repeat(Math.max(iw - 2, 10))), width));
-            const prompt = t.fg("accent", " ▸ ");
-            const beforeCursor = this.inputText.slice(0, this.inputCursor);
-            const cursorChar = this.inputCursor < this.inputText.length ? this.inputText[this.inputCursor]! : " ";
-            const afterCursor = this.inputText.slice(this.inputCursor + 1);
+            const promptStr = " ▸ ";
+            const prompt = t.fg("accent", promptStr);
+            // Horizontal scroll: show a window of text around the cursor
+            const maxInputWidth = Math.max(iw - visibleWidth(promptStr) - 2, 10);
+            let visibleStart = 0;
+            if (this.inputCursor > maxInputWidth - 5) {
+                visibleStart = this.inputCursor - maxInputWidth + 5;
+            }
+            const visibleText = this.inputText.slice(visibleStart, visibleStart + maxInputWidth);
+            const cursorInWindow = this.inputCursor - visibleStart;
+            const beforeCursor = visibleText.slice(0, cursorInWindow);
+            const cursorChar = cursorInWindow < visibleText.length ? visibleText[cursorInWindow]! : " ";
+            const afterCursor = visibleText.slice(cursorInWindow + 1);
+            const scrollIndicator = visibleStart > 0 ? t.fg("dim", "…") : "";
             const marker = this.focused ? CURSOR_MARKER : "";
-            const inputLine = prompt + beforeCursor + marker + `\x1b[7m${cursorChar}\x1b[27m` + afterCursor;
+            const inputLine = prompt + scrollIndicator + beforeCursor + marker + `\x1b[7m${cursorChar}\x1b[27m` + afterCursor;
             lines.push(this.row(inputLine, width));
         }
 
@@ -744,6 +754,9 @@ interface OverlayContext {
 /**
  * Open the dashboard overlay.
  */
+/** Max overlay width in columns */
+const MAX_OVERLAY_WIDTH = 120;
+
 export function openDashboardOverlay(ctx: OverlayContext, focusAgent?: string): void {
     if (!ctx.hasUI) return;
 
@@ -755,7 +768,7 @@ export function openDashboardOverlay(ctx: OverlayContext, focusAgent?: string): 
             overlay: true,
             overlayOptions: {
                 anchor: "center",
-                width: "80%",
+                width: MAX_OVERLAY_WIDTH,
                 maxHeight: "80%",
             },
         },
