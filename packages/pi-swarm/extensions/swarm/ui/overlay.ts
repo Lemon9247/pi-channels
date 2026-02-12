@@ -1,62 +1,90 @@
 /**
  * Interactive Dashboard Overlay
  *
- * Modal overlay component for detailed swarm observation.
+ * Modal overlay for swarm observation and interaction.
  * Two view modes:
  *   - List: all agents with status, usage, current activity. Arrow key navigation.
- *   - Detail: single agent with task, full tool call history, channel messages.
+ *   - Detail: single agent with raw output stream (thinking, messages, tool calls
+ *     with full results). Scrollable. Press 'i' to send instructions.
  *
  * Reads from the same stores as the passive widget (activity.ts, state.ts).
  * Live-updates via a refresh timer while open.
  */
 
-import type { TUI, Component } from "@mariozechner/pi-tui";
-import { matchesKey, Key } from "@mariozechner/pi-tui";
+import type { TUI, Component, Focusable } from "@mariozechner/pi-tui";
+import { matchesKey, Key, visibleWidth, truncateToWidth, CURSOR_MARKER } from "@mariozechner/pi-tui";
 import { getSwarmState, type AgentInfo } from "../core/state.js";
 import { getAgentActivity, getAgentUsage, getAggregateUsage, type ActivityEvent } from "./activity.js";
-import { formatToolCall, formatTokens, formatUsageStats, statusIcon, eventIcon, formatAge } from "./format.js";
+import { formatTokens, formatUsageStats, statusIcon, formatAge } from "./format.js";
+import { getIdentity } from "../core/identity.js";
+import { inboxName, GENERAL_CHANNEL } from "../core/channels.js";
+
+// ─── Dashboard Open State ───────────────────────────────────────────
+
+let dashboardOpen = false;
+
+/** Returns true when the dashboard is open and notifications should be buffered. */
+export function isDashboardOpen(): boolean {
+    return dashboardOpen;
+}
 
 // ─── Types ──────────────────────────────────────────────────────────
 
+type AgentStatus = "running" | "starting" | "done" | "blocked" | "crashed" | "disconnected";
 type ViewMode = "list" | "detail";
+
+interface Theme {
+    fg: (color: string, text: string) => string;
+    bg: (color: string, text: string) => string;
+    bold: (text: string) => string;
+}
 
 interface DashboardOptions {
     tui: TUI;
-    theme: { fg: (color: string, text: string) => string; bg: (color: string, text: string) => string; bold: (text: string) => string };
+    theme: Theme;
     done: (result: void) => void;
-    /** Pre-focus on a specific agent (from /hive <name>) */
     focusAgent?: string;
 }
 
 // ─── Overlay Component ──────────────────────────────────────────────
 
-export class DashboardOverlay implements Component {
+export class DashboardOverlay implements Component, Focusable {
     private tui: TUI;
-    private theme: DashboardOptions["theme"];
+    private theme: Theme;
     private done: (result: void) => void;
 
-    // State machine
+    // Focusable — set by TUI when this component has focus
+    focused = false;
+
+    // View state
     private viewMode: ViewMode = "list";
     private selectedIndex = 0;
     private scrollOffset = 0;
-    private lastMaxScroll = 0;
+    private autoScroll = true;
     private detailAgent: string | null = null;
+
+    // Instruct input state
+    private inputActive = false;
+    private inputText = "";
+    private inputCursor = 0;
+
+    // Cached agent list for stable indexing
+    private cachedAgents: AgentInfo[] = [];
+
+    // Track rendered content height for scroll clamping
+    private lastContentHeight = 0;
 
     // Live update timer
     private refreshTimer: ReturnType<typeof setInterval> | null = null;
-
-    // Cache the sorted agent list for stable indexing
-    private cachedAgents: AgentInfo[] = [];
 
     constructor(opts: DashboardOptions) {
         this.tui = opts.tui;
         this.theme = opts.theme;
         this.done = opts.done;
+        dashboardOpen = true;
 
-        // Always populate agent list on construction so handleInput works immediately
         this.refreshAgentList();
 
-        // Pre-focus on a specific agent if requested
         if (opts.focusAgent) {
             const idx = this.cachedAgents.findIndex(a => a.name === opts.focusAgent);
             if (idx >= 0) {
@@ -67,91 +95,95 @@ export class DashboardOverlay implements Component {
             }
         }
 
-        // Start live refresh (every 1.5s)
         this.startRefresh();
     }
 
     dispose(): void {
         this.stopRefresh();
+        dashboardOpen = false;
     }
 
     invalidate(): void {
-        // No cached render state to clear
+        // No cached render state — we rebuild every frame
     }
 
     // ─── Render ─────────────────────────────────────────────────────
 
     render(width: number): string[] {
+        const w = Math.min(width, MAX_OVERLAY_WIDTH);
         this.refreshAgentList();
 
         if (this.cachedAgents.length === 0) {
-            return this.renderEmpty(width);
+            return this.renderEmpty(w);
         }
 
         switch (this.viewMode) {
             case "list":
-                return this.renderList(width);
+                return this.renderList(w);
             case "detail":
-                return this.renderDetail(width);
+                return this.renderDetail(w);
         }
     }
 
     private renderEmpty(width: number): string[] {
-        const { theme } = this;
-        const lines: string[] = [];
-        lines.push(theme.bold(theme.fg("accent", " 🐝 Agent Dashboard")));
-        lines.push("");
-        lines.push(theme.fg("muted", "  No active swarm."));
-        lines.push("");
-        lines.push(theme.fg("dim", "  Press ") + theme.fg("muted", "Esc") + theme.fg("dim", " or ") + theme.fg("muted", "q") + theme.fg("dim", " to close."));
-        return lines;
+        const t = this.theme;
+        const iw = width - 2;
+        return [
+            t.fg("border", `╭${"─".repeat(iw)}╮`),
+            this.row(t.bold(t.fg("accent", " 🐝 Agent Dashboard")), width),
+            this.row("", width),
+            this.row(t.fg("muted", "  No active swarm."), width),
+            this.row("", width),
+            this.row("  " + t.fg("dim", "Esc") + t.fg("muted", " close"), width),
+            t.fg("border", `╰${"─".repeat(iw)}╯`),
+        ];
     }
 
     // ─── List View ──────────────────────────────────────────────────
 
     private renderList(width: number): string[] {
-        const { theme } = this;
+        const t = this.theme;
+        const iw = width - 2;
         const lines: string[] = [];
-        const agents = this.cachedAgents;
 
         // Header
-        const aggregate = getAggregateUsage();
-        const done = agents.filter(a => a.status === "done").length;
-        let header = ` 🐝 Agent Dashboard — ${done}/${agents.length} complete`;
-        if (aggregate.cost > 0) header += ` — $${aggregate.cost.toFixed(2)}`;
-        lines.push(theme.bold(theme.fg("accent", header)));
-
-        // Separator
-        lines.push(theme.fg("border", " " + "─".repeat(Math.max(width - 2, 20))));
+        const agents = this.cachedAgents;
+        const doneCount = agents.filter(a => a.status === "done").length;
+        const agg = getAggregateUsage();
+        let header = ` 🐝 Agent Dashboard — ${doneCount}/${agents.length} complete`;
+        if (agg.cost > 0) header += ` — $${agg.cost.toFixed(2)}`;
+        lines.push(t.fg("border", `╭${"─".repeat(iw)}╮`));
+        lines.push(this.row(t.bold(t.fg("accent", header)), width));
+        lines.push(this.row(t.fg("border", " " + "─".repeat(iw - 2)), width));
 
         // Agent rows
-        const contentWidth = width - 4; // 2 padding on each side
         for (let i = 0; i < agents.length; i++) {
             const agent = agents[i];
             const isSelected = i === this.selectedIndex;
-            const row = this.renderAgentRow(agent, contentWidth, isSelected);
-            lines.push(row);
+            lines.push(this.renderAgentRow(agent, width, isSelected));
         }
 
         // Footer
-        lines.push(theme.fg("border", " " + "─".repeat(Math.max(width - 2, 20))));
-        lines.push(
-            theme.fg("dim", "  ↑↓") + theme.fg("muted", " navigate") +
-            theme.fg("dim", "  ⏎") + theme.fg("muted", " detail") +
-            theme.fg("dim", "  Esc/q") + theme.fg("muted", " close")
-        );
+        lines.push(this.row(t.fg("border", " " + "─".repeat(iw - 2)), width));
+        lines.push(this.row(
+            "  " + t.fg("dim", "↑↓") + t.fg("muted", " navigate  ") +
+            t.fg("dim", "⏎") + t.fg("muted", " detail  ") +
+            t.fg("dim", "Esc/q") + t.fg("muted", " close"),
+            width,
+        ));
+        lines.push(t.fg("border", `╰${"─".repeat(iw)}╯`));
 
         return lines;
     }
 
-    private renderAgentRow(agent: AgentInfo, contentWidth: number, isSelected: boolean): string {
-        const { theme } = this;
+    private renderAgentRow(agent: AgentInfo, width: number, isSelected: boolean): string {
+        const t = this.theme;
         const icon = statusIcon(agent.status);
         const role = agent.role === "coordinator" ? "co" : "ag";
 
-        // Usage stats
+        // Usage
         const usage = getAgentUsage(agent.name);
-        let usageParts: string[] = [];
+        const usageParts: string[] = [];
         if (usage.turns) {
             usageParts.push(`${usage.turns}t`);
             if (usage.input) usageParts.push(`↑${formatTokens(usage.input)}`);
@@ -159,163 +191,223 @@ export class DashboardOverlay implements Component {
         }
         const usageStr = usageParts.length > 0 ? usageParts.join(" ") : "";
 
-        // Current activity
-        let detail = this.getAgentDetail(agent);
+        // Current activity summary
+        let detail = this.getAgentSummary(agent);
 
-        // Build the row
+        // Build row
         const prefix = isSelected ? " ▸ " : "   ";
         const statusColor = this.statusColor(agent.status);
         const nameStr = `${icon} ${agent.name} (${role})`;
 
         // Calculate available space for detail
-        const fixedLen = nameStr.length + (usageStr ? usageStr.length + 2 : 0) + 3; // padding
-        const maxDetail = Math.max(contentWidth - fixedLen, 10);
-        if (detail.length > maxDetail) {
-            detail = detail.slice(0, maxDetail - 1) + "…";
+        const fixedWidth = visibleWidth(prefix) + visibleWidth(nameStr) + (usageStr ? visibleWidth(usageStr) + 4 : 2);
+        const maxDetail = Math.max(width - fixedWidth - 4, 10);
+        if (visibleWidth(detail) > maxDetail) {
+            detail = truncateToWidth(detail, maxDetail);
         }
 
-        let row = prefix;
-        row += theme.fg(statusColor, nameStr);
-        if (usageStr) row += "  " + theme.fg("dim", usageStr);
-        if (detail) row += "  " + theme.fg("muted", detail);
+        let row = prefix + t.fg(statusColor, nameStr);
+        if (usageStr) row += "  " + t.fg("dim", usageStr);
+        if (detail) row += "  " + t.fg("muted", detail);
 
         if (isSelected) {
-            row = theme.bg("selectedBg", row);
+            row = t.bg("selectedBg", row);
         }
 
-        return row;
+        return this.row(row, width);
     }
 
     // ─── Detail View ────────────────────────────────────────────────
 
     private renderDetail(width: number): string[] {
-        const { theme } = this;
+        const t = this.theme;
+        const iw = width - 2;
         const state = getSwarmState();
         if (!state || !this.detailAgent) return this.renderEmpty(width);
 
         const agent = state.agents.get(this.detailAgent);
         if (!agent) return this.renderEmpty(width);
 
-        const allLines: string[] = [];
+        // Build all content lines (before scroll windowing)
+        const contentLines: string[] = [];
 
         // Header
         const icon = statusIcon(agent.status);
         const usage = getAgentUsage(agent.name);
-        let usageStr = "";
+        const statusColor = this.statusColor(agent.status);
+        let headerText = " " + t.fg("dim", "←") + " " +
+            t.bold(t.fg(statusColor, `${icon} ${agent.name}`)) +
+            t.fg("muted", ` (${agent.role}, ${agent.swarm})`) +
+            t.fg("dim", ` — ${agent.status}`);
         if (usage.turns) {
-            const parts: string[] = [`${usage.turns}t`];
+            const parts = [`${usage.turns}t`];
             if (usage.input) parts.push(`↑${formatTokens(usage.input)}`);
             if (usage.cost) parts.push(`$${usage.cost.toFixed(2)}`);
-            usageStr = parts.join(" ");
+            headerText += "  " + t.fg("dim", parts.join(" "));
         }
+        contentLines.push(headerText);
+        contentLines.push(t.fg("border", " " + "─".repeat(Math.max(iw - 2, 10))));
 
-        const statusColor = this.statusColor(agent.status);
-        allLines.push(
-            " " + theme.fg("dim", "←") + " " +
-            theme.bold(theme.fg(statusColor, `${icon} ${agent.name}`)) +
-            theme.fg("muted", ` (${agent.role}, ${agent.swarm})`) +
-            theme.fg("dim", ` — ${agent.status}`) +
-            (usageStr ? "  " + theme.fg("dim", usageStr) : "")
-        );
-
-        // Separator
-        allLines.push(theme.fg("border", " " + "─".repeat(Math.max(width - 2, 20))));
-
-        // Status details (done summary, blocker)
+        // Status details
         if (agent.doneSummary) {
-            allLines.push(theme.fg("success", `  ✓ ${agent.doneSummary}`));
+            contentLines.push(t.fg("success", `  ✓ ${agent.doneSummary}`));
         }
         if (agent.blockerDescription) {
-            allLines.push(theme.fg("warning", `  ⚠ ${agent.blockerDescription}`));
+            contentLines.push(t.fg("warning", `  ⚠ ${agent.blockerDescription}`));
         }
-
-        // Progress info
         if (agent.progressPhase || agent.progressPercent != null || agent.progressDetail) {
             const parts: string[] = [];
             if (agent.progressPhase) parts.push(agent.progressPhase);
             if (agent.progressPercent != null) parts.push(`${agent.progressPercent}%`);
             if (agent.progressDetail) parts.push(agent.progressDetail);
-            allLines.push(theme.fg("accent", `  ⟳ ${parts.join(" — ")}`));
+            contentLines.push(t.fg("accent", `  ⟳ ${parts.join(" — ")}`));
         }
 
-        // Task
+        // Task (truncated to 3 lines)
         if (agent.task) {
-            allLines.push("");
-            allLines.push(theme.bold(theme.fg("text", "  Task:")));
-            const taskLines = this.wrapText(agent.task, width - 4);
-            for (const line of taskLines) {
-                allLines.push("  " + theme.fg("muted", line));
-            }
+            contentLines.push("");
+            contentLines.push(t.bold(t.fg("text", "  Task:")));
+            const taskOneLine = agent.task.replace(/\n/g, " ");
+            contentLines.push("  " + t.fg("muted", taskOneLine));
         }
 
-        // Activity feed
-        allLines.push("");
-        allLines.push(theme.bold(theme.fg("text", "  Activity:")));
-
+        // Activity stream — one line per event, always truncated
+        contentLines.push("");
+        contentLines.push(t.bold(t.fg("text", "  Activity:")));
         const activity = getAgentActivity(agent.name);
+
         if (activity.length === 0) {
-            allLines.push(theme.fg("dim", "  (no activity recorded yet)"));
+            contentLines.push(t.fg("dim", "  (waiting for activity...)"));
         } else {
-            const themeFg = (color: string, text: string) => theme.fg(color as any, text);
             for (const ev of activity) {
                 const age = formatAge(ev.timestamp).padStart(4);
-                const icon = eventIcon(ev.type);
+                const ageStr = t.fg("dim", age) + " ";
 
-                // Use formatToolCall for tool events when we have structured data
-                let line: string;
-                if (ev.type === "tool_start" && ev.toolName) {
-                    const formatted = formatToolCall(ev.toolName, ev.toolArgs || {}, themeFg);
-                    line = `  ${theme.fg("dim", age)} ${icon} ${formatted}`;
-                } else if (ev.type === "tool_end") {
-                    const color = ev.isError ? "error" : "success";
-                    line = `  ${theme.fg("dim", age)} ${theme.fg(color, ev.summary)}`;
-                } else {
-                    // Truncate long messages for the feed
-                    let summary = ev.summary;
-                    const maxLen = width - 14;
-                    if (summary.length > maxLen) {
-                        summary = summary.slice(0, maxLen - 1) + "…";
+                switch (ev.type) {
+                    case "thinking": {
+                        const text = (ev.summary || "").replace(/\n/g, " ");
+                        contentLines.push("  " + ageStr + t.fg("dim", "💭 " + text));
+                        break;
                     }
-                    const color = ev.type === "thinking" ? "dim" : "muted";
-                    line = `  ${theme.fg("dim", age)} ${icon} ${theme.fg(color, summary)}`;
+                    case "message": {
+                        const text = (ev.summary || "").replace(/\n/g, " ");
+                        contentLines.push("  " + ageStr + t.fg("text", "💬 " + text));
+                        break;
+                    }
+                    case "tool_start": {
+                        const formatted = ev.toolName
+                            ? this.formatToolStart(ev.toolName, ev.toolArgs || {})
+                            : ev.summary;
+                        contentLines.push("  " + ageStr + t.fg("accent", "▶ " + formatted));
+                        break;
+                    }
+                    case "tool_end": {
+                        const color = ev.isError ? "error" : "success";
+                        const marker = ev.isError ? "✗" : "✓";
+                        const name = ev.toolName || "";
+                        const preview = ev.isError && ev.toolResult
+                            ? ` ${ev.toolResult.replace(/\n/g, " ").slice(0, 60)}`
+                            : "";
+                        contentLines.push("  " + ageStr + t.fg(color, `${marker} ${name}${preview}`));
+                        break;
+                    }
                 }
-                allLines.push(line);
             }
         }
 
         // Usage summary at bottom
         if (usage.turns) {
-            allLines.push("");
-            allLines.push(theme.fg("border", " " + "─".repeat(Math.max(width - 2, 20))));
-            allLines.push("  " + theme.fg("dim", formatUsageStats(usage)));
+            contentLines.push("");
+            contentLines.push(t.fg("border", " " + "─".repeat(Math.max(iw - 2, 10))));
+            contentLines.push("  " + t.fg("dim", formatUsageStats(usage)));
         }
 
-        // Apply scroll offset — show a window of content
-        const footerLines = [
-            theme.fg("border", " " + "─".repeat(Math.max(width - 2, 20))),
-            theme.fg("dim", "  ↑↓") + theme.fg("muted", " scroll") +
-            theme.fg("dim", "  Esc") + theme.fg("muted", " back to list"),
-        ];
+        // Store content height for scroll clamping
+        this.lastContentHeight = contentLines.length;
 
-        // Clamp scroll offset and track max for input handler
-        const maxScroll = Math.max(0, allLines.length - 1);
-        this.lastMaxScroll = maxScroll;
+        // Now assemble the final output with borders, scroll window, and footer
+
+        const lines: string[] = [];
+        lines.push(t.fg("border", `╭${"─".repeat(iw)}╮`));
+
+        // Calculate visible area (reserve space for footer)
+        const footerHeight = this.inputActive ? 4 : 3; // border + hints + (input bar + border)
+        const maxVisible = 30; // reasonable max height
+        const visibleHeight = Math.min(contentLines.length, maxVisible);
+
+        // Auto-scroll: if we were at the bottom, stay at the bottom
+        const maxScroll = Math.max(0, contentLines.length - visibleHeight);
+        if (this.autoScroll) {
+            this.scrollOffset = maxScroll;
+        }
+        // Clamp scroll
         if (this.scrollOffset > maxScroll) this.scrollOffset = maxScroll;
         if (this.scrollOffset < 0) this.scrollOffset = 0;
 
-        const visibleLines = allLines.slice(this.scrollOffset);
-
         // Scroll indicator
         if (this.scrollOffset > 0) {
-            visibleLines.unshift(theme.fg("dim", `  ↑ ${this.scrollOffset} more line${this.scrollOffset === 1 ? "" : "s"} above`));
+            lines.push(this.row(t.fg("dim", `  ↑ ${this.scrollOffset} more line${this.scrollOffset === 1 ? "" : "s"} above`), width));
         }
 
-        return [...visibleLines, ...footerLines];
+        // Visible content window
+        const visible = contentLines.slice(this.scrollOffset, this.scrollOffset + visibleHeight);
+        for (const line of visible) {
+            lines.push(this.row(line, width));
+        }
+
+        if (this.scrollOffset < maxScroll) {
+            const below = maxScroll - this.scrollOffset;
+            lines.push(this.row(t.fg("dim", `  ↓ ${below} more line${below === 1 ? "" : "s"} below`), width));
+        }
+
+        // Footer separator
+        lines.push(this.row(t.fg("border", " " + "─".repeat(Math.max(iw - 2, 10))), width));
+
+        // Keybind hints
+        let hints = "  " + t.fg("dim", "↑↓") + t.fg("muted", " scroll  ");
+        if (!this.inputActive) {
+            hints += t.fg("dim", "i") + t.fg("muted", " instruct  ");
+        }
+        hints += t.fg("dim", "Esc") + t.fg("muted", " back  ");
+        hints += t.fg("dim", "q") + t.fg("muted", " close");
+        lines.push(this.row(hints, width));
+
+        // Instruct input bar
+        if (this.inputActive) {
+            lines.push(this.row(t.fg("border", " " + "─".repeat(Math.max(iw - 2, 10))), width));
+            const promptStr = " ▸ ";
+            const prompt = t.fg("accent", promptStr);
+            // Horizontal scroll: show a window of text around the cursor
+            const maxInputWidth = Math.max(iw - visibleWidth(promptStr) - 2, 10);
+            let visibleStart = 0;
+            if (this.inputCursor > maxInputWidth - 5) {
+                visibleStart = this.inputCursor - maxInputWidth + 5;
+            }
+            const visibleText = this.inputText.slice(visibleStart, visibleStart + maxInputWidth);
+            const cursorInWindow = this.inputCursor - visibleStart;
+            const beforeCursor = visibleText.slice(0, cursorInWindow);
+            const cursorChar = cursorInWindow < visibleText.length ? visibleText[cursorInWindow]! : " ";
+            const afterCursor = visibleText.slice(cursorInWindow + 1);
+            const scrollIndicator = visibleStart > 0 ? t.fg("dim", "…") : "";
+            const marker = this.focused ? CURSOR_MARKER : "";
+            const inputLine = prompt + scrollIndicator + beforeCursor + marker + `\x1b[7m${cursorChar}\x1b[27m` + afterCursor;
+            lines.push(this.row(inputLine, width));
+        }
+
+        // Bottom border
+        lines.push(t.fg("border", `╰${"─".repeat(iw)}╯`));
+
+        return lines;
     }
 
     // ─── Input Handling ─────────────────────────────────────────────
 
     handleInput(data: string): void {
+        if (this.inputActive) {
+            this.handleInputMode(data);
+            return;
+        }
+
         switch (this.viewMode) {
             case "list":
                 this.handleListInput(data);
@@ -344,6 +436,7 @@ export class DashboardOverlay implements Component {
                     this.viewMode = "detail";
                     this.detailAgent = agent.name;
                     this.scrollOffset = 0;
+                    this.autoScroll = true;
                     this.tui.requestRender();
                 }
             }
@@ -354,27 +447,134 @@ export class DashboardOverlay implements Component {
 
     private handleDetailInput(data: string): void {
         if (matchesKey(data, Key.up)) {
+            this.autoScroll = false;
             if (this.scrollOffset > 0) {
                 this.scrollOffset--;
                 this.tui.requestRender();
             }
         } else if (matchesKey(data, Key.down)) {
-            if (this.scrollOffset < this.lastMaxScroll) {
+            const maxScroll = Math.max(0, this.lastContentHeight - 30);
+            if (this.scrollOffset < maxScroll) {
                 this.scrollOffset++;
                 this.tui.requestRender();
             }
+            // Re-enable auto-scroll if we're at the bottom
+            if (this.scrollOffset >= maxScroll) {
+                this.autoScroll = true;
+            }
+        } else if (data === "i") {
+            // Activate instruct input
+            this.inputActive = true;
+            this.inputText = "";
+            this.inputCursor = 0;
+            this.tui.requestRender();
         } else if (matchesKey(data, Key.escape)) {
-            // Back to list view
+            // Back to list
             this.viewMode = "list";
             this.detailAgent = null;
             this.scrollOffset = 0;
+            this.autoScroll = true;
             this.tui.requestRender();
         } else if (data === "q") {
             this.close();
         }
     }
 
+    private handleInputMode(data: string): void {
+        if (matchesKey(data, Key.escape)) {
+            // Cancel input
+            this.inputActive = false;
+            this.inputText = "";
+            this.inputCursor = 0;
+            this.tui.requestRender();
+        } else if (matchesKey(data, Key.enter)) {
+            // Send instruction
+            if (this.inputText.trim() && this.detailAgent) {
+                this.sendInstruction(this.detailAgent, this.inputText.trim());
+            }
+            this.inputActive = false;
+            this.inputText = "";
+            this.inputCursor = 0;
+            this.tui.requestRender();
+        } else if (matchesKey(data, Key.backspace)) {
+            if (this.inputCursor > 0) {
+                this.inputText = this.inputText.slice(0, this.inputCursor - 1) + this.inputText.slice(this.inputCursor);
+                this.inputCursor--;
+                this.tui.requestRender();
+            }
+        } else if (matchesKey(data, Key.left)) {
+            if (this.inputCursor > 0) {
+                this.inputCursor--;
+                this.tui.requestRender();
+            }
+        } else if (matchesKey(data, Key.right)) {
+            if (this.inputCursor < this.inputText.length) {
+                this.inputCursor++;
+                this.tui.requestRender();
+            }
+        } else if (matchesKey(data, Key.home)) {
+            this.inputCursor = 0;
+            this.tui.requestRender();
+        } else if (matchesKey(data, Key.end)) {
+            this.inputCursor = this.inputText.length;
+            this.tui.requestRender();
+        } else if (data.length === 1 && data.charCodeAt(0) >= 32) {
+            // Printable character
+            this.inputText = this.inputText.slice(0, this.inputCursor) + data + this.inputText.slice(this.inputCursor);
+            this.inputCursor++;
+            this.tui.requestRender();
+        }
+    }
+
+    // ─── Instruct ───────────────────────────────────────────────────
+
+    private sendInstruction(agentName: string, instruction: string): void {
+        const state = getSwarmState();
+        if (!state) return;
+
+        const identity = getIdentity();
+        const msg = {
+            msg: instruction,
+            data: {
+                type: "instruct",
+                from: identity.name,
+                instruction,
+                to: agentName,
+            },
+        };
+
+        // Try agent inbox first
+        const targetInbox = inboxName(agentName);
+        const inboxClient = state.queenClients.get(targetInbox);
+        if (inboxClient?.connected) {
+            try {
+                inboxClient.send(msg);
+                return;
+            } catch { /* fall through */ }
+        }
+
+        // Fallback to general
+        const generalClient = state.queenClients.get(GENERAL_CHANNEL);
+        if (generalClient?.connected) {
+            try {
+                generalClient.send(msg);
+            } catch { /* ignore */ }
+        }
+    }
+
     // ─── Helpers ────────────────────────────────────────────────────
+
+    /** Pad/truncate a content string into a bordered row */
+    private row(content: string, width: number): string {
+        const t = this.theme;
+        const iw = width - 2;
+        const vw = visibleWidth(content);
+        if (vw > iw) {
+            return t.fg("border", "│") + truncateToWidth(content, iw) + t.fg("border", "│");
+        }
+        const padding = iw - vw;
+        return t.fg("border", "│") + content + " ".repeat(padding) + t.fg("border", "│");
+    }
 
     private refreshAgentList(): void {
         const state = getSwarmState();
@@ -382,48 +582,32 @@ export class DashboardOverlay implements Component {
             this.cachedAgents = [];
             return;
         }
-        // Sort: running first, then starting, blocked, done, crashed, disconnected
-        const order: Record<AgentStatus, number> = {
-            running: 0,
-            starting: 1,
-            blocked: 2,
-            done: 3,
-            crashed: 4,
-            disconnected: 5,
+        const order: Record<string, number> = {
+            running: 0, starting: 1, blocked: 2, done: 3, crashed: 4, disconnected: 5,
         };
         this.cachedAgents = Array.from(state.agents.values())
             .sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || a.name.localeCompare(b.name));
 
-        // Clamp selectedIndex
         if (this.selectedIndex >= this.cachedAgents.length) {
             this.selectedIndex = Math.max(0, this.cachedAgents.length - 1);
         }
     }
 
-    private getAgentDetail(agent: AgentInfo): string {
-        if (agent.status === "done" && agent.doneSummary) {
-            return agent.doneSummary;
-        }
-        if (agent.status === "blocked" && agent.blockerDescription) {
-            return agent.blockerDescription;
-        }
-        if (agent.progressDetail) {
-            return agent.progressDetail;
-        }
+    private getAgentSummary(agent: AgentInfo): string {
+        if (agent.status === "done" && agent.doneSummary) return agent.doneSummary;
+        if (agent.status === "blocked" && agent.blockerDescription) return agent.blockerDescription;
+        if (agent.progressDetail) return agent.progressDetail;
         if (agent.progressPhase) {
             const parts: string[] = [agent.progressPhase];
             if (agent.progressPercent != null) parts.push(`${agent.progressPercent}%`);
             return parts.join(" — ");
         }
-        // Last activity event
         const activity = getAgentActivity(agent.name);
-        if (activity.length > 0) {
-            return activity[activity.length - 1].summary;
-        }
+        if (activity.length > 0) return activity[activity.length - 1].summary;
         return agent.status;
     }
 
-    private statusColor(status: AgentStatus): string {
+    private statusColor(status: string): string {
         switch (status) {
             case "running": return "accent";
             case "starting": return "muted";
@@ -435,25 +619,39 @@ export class DashboardOverlay implements Component {
         }
     }
 
-    private wrapText(text: string, maxWidth: number): string[] {
-        if (maxWidth <= 0) return [text];
-        const words = text.split(/\s+/);
-        const lines: string[] = [];
-        let current = "";
-        for (const word of words) {
-            if (current.length + word.length + 1 > maxWidth && current.length > 0) {
-                lines.push(current);
-                current = word;
-            } else {
-                current = current ? current + " " + word : word;
+    private formatToolStart(name: string, args: Record<string, unknown>): string {
+        switch (name) {
+            case "bash": {
+                const cmd = (args.command as string) || "";
+                return `$ ${cmd.length > 80 ? cmd.slice(0, 80) + "…" : cmd}`;
             }
+            case "read": {
+                const path = (args.path as string) || "";
+                let desc = `read ${path}`;
+                if (args.offset) desc += `:${args.offset}`;
+                if (args.limit) desc += `+${args.limit}`;
+                return desc;
+            }
+            case "edit":
+                return `edit ${(args.path as string) || ""}`;
+            case "write":
+                return `write ${(args.path as string) || ""}`;
+            case "hive_notify":
+                return `hive_notify "${(args.reason as string) || ""}"`;
+            case "hive_blocker":
+                return `hive_blocker "${(args.description as string) || ""}"`;
+            case "hive_done":
+                return `hive_done "${(args.summary as string) || ""}"`;
+            case "hive_progress": {
+                const parts: string[] = [];
+                if (args.phase) parts.push(args.phase as string);
+                if (args.percent != null) parts.push(`${args.percent}%`);
+                if (args.detail) parts.push(args.detail as string);
+                return `hive_progress ${parts.join(" — ")}`;
+            }
+            default:
+                return name;
         }
-        if (current) lines.push(current);
-        // Cap at 5 lines for task display
-        if (lines.length > 5) {
-            return [...lines.slice(0, 4), lines[4].slice(0, maxWidth - 1) + "…"];
-        }
-        return lines;
     }
 
     private startRefresh(): void {
@@ -483,31 +681,24 @@ interface OverlayContext {
     hasUI: boolean;
     ui: {
         custom<T>(
-            factory: (tui: TUI, theme: DashboardOptions["theme"], keybindings: unknown, done: (result: T) => void) => Component,
-            options: { overlay: boolean; overlayOptions: { anchor: string; width: string; maxHeight: string } },
+            factory: (tui: TUI, theme: Theme, keybindings: unknown, done: (result: T) => void) => Component,
+            options?: { overlay?: boolean },
         ): Promise<T>;
     };
 }
 
 /**
  * Open the dashboard overlay.
- * @param ctx Extension context with UI access
- * @param focusAgent Optional agent name to pre-focus on (for /hive <name>)
  */
+/** Max overlay width in columns */
+const MAX_OVERLAY_WIDTH = 120;
+
 export function openDashboardOverlay(ctx: OverlayContext, focusAgent?: string): void {
     if (!ctx.hasUI) return;
 
     ctx.ui.custom(
-        (tui: TUI, theme: DashboardOptions["theme"], _keybindings: unknown, done: (result: void) => void) => {
+        (tui: TUI, theme: Theme, _keybindings: unknown, done: (result: void) => void) => {
             return new DashboardOverlay({ tui, theme, done, focusAgent });
-        },
-        {
-            overlay: true,
-            overlayOptions: {
-                anchor: "center",
-                width: "80%",
-                maxHeight: "80%",
-            },
         },
     );
 }

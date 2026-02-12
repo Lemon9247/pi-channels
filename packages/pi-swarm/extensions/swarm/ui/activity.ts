@@ -20,6 +20,7 @@ export interface ActivityEvent {
     toolResult?: string;
     isError?: boolean;
     messageText?: string;
+    thinkingText?: string;
     tokens?: { input: number; output: number };
 }
 
@@ -160,7 +161,9 @@ function parseJsonEvent(agentName: string, line: string): void {
             const toolName = event.toolName || "unknown";
             const isError = !!event.isError;
             const summary = isError ? `✗ ${toolName} failed` : `✓ ${toolName}`;
-            const toolResult = event.result != null ? String(event.result) : undefined;
+            const toolResult = event.result != null
+                ? (typeof event.result === "string" ? event.result : JSON.stringify(event.result, null, 2))
+                : undefined;
 
             pushEvent(agentName, {
                 timestamp: now,
@@ -169,7 +172,7 @@ function parseJsonEvent(agentName: string, line: string): void {
                 detail: isError ? JSON.stringify(event.result) : undefined,
                 toolName,
                 isError,
-                toolResult: toolResult ? toolResult.slice(0, 1024) : undefined,
+                toolResult: toolResult ? toolResult.slice(0, 8192) : undefined,
             });
             break;
         }
@@ -223,6 +226,7 @@ function parseJsonEvent(agentName: string, line: string): void {
                                 timestamp: now,
                                 type: "thinking",
                                 summary: snippet,
+                                thinkingText: text.slice(0, 4096),
                                 tokens,
                             });
                         }
