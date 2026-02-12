@@ -152,8 +152,8 @@ describe("activity", () => {
             assert.equal(events[0].isError, false);
         });
 
-        it("tool_end truncates result to 1024 chars", async () => {
-            const longResult = "x".repeat(2000);
+        it("tool_end truncates result to 8192 chars", async () => {
+            const longResult = "x".repeat(10000);
             const stream = mockStdout([
                 toolEndEvent("bash", false, longResult),
             ]);
@@ -161,7 +161,7 @@ describe("activity", () => {
             await waitForStream(stream);
 
             const events = getAgentActivity("a1");
-            assert.equal(events[0].toolResult!.length, 1024);
+            assert.equal(events[0].toolResult!.length, 8192);
         });
 
         it("message event has messageText and tokens", async () => {
