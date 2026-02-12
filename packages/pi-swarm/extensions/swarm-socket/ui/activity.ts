@@ -1,35 +1,72 @@
 /**
  * Agent Activity Tracker
  *
- * Captures agent stdout (JSON mode events) and stores recent
- * activity per agent. Provides a queryable activity feed.
+ * Captures agent stdout (JSON mode events) and stores activity
+ * per agent. Provides a queryable activity feed and per-agent
+ * usage tracking (tokens, cost, turns).
  */
+
+import { type UsageStats } from "./format.js";
+import { shortenPath } from "./format.js";
 
 export interface ActivityEvent {
     timestamp: number;
     type: "tool_start" | "tool_end" | "message" | "thinking";
     summary: string;
     detail?: string;
+    // Structured fields (populated when available)
+    toolName?: string;
+    toolArgs?: Record<string, unknown>;
+    toolResult?: string;
+    isError?: boolean;
+    messageText?: string;
+    tokens?: { input: number; output: number };
 }
 
-const MAX_EVENTS_PER_AGENT = 30;
-
-// Per-agent activity log
+// Per-agent activity log (no cap — agent sessions are finite)
 const agentActivity = new Map<string, ActivityEvent[]>();
 
+// Per-agent usage accumulation
+const agentUsage = new Map<string, UsageStats>();
+
+function emptyUsage(): UsageStats {
+    return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 };
+}
+
 export function getAgentActivity(name: string): ActivityEvent[] {
-    return agentActivity.get(name) || [];
+    const events = agentActivity.get(name);
+    return events ? [...events] : [];
 }
 
 export function getAllActivity(): Map<string, ActivityEvent[]> {
     return agentActivity;
 }
 
+export function getAgentUsage(name: string): UsageStats {
+    const stats = agentUsage.get(name);
+    return stats ? { ...stats } : emptyUsage();
+}
+
+export function getAggregateUsage(): UsageStats {
+    const totals = emptyUsage();
+    for (const usage of agentUsage.values()) {
+        totals.input += usage.input;
+        totals.output += usage.output;
+        totals.cacheRead += usage.cacheRead;
+        totals.cacheWrite += usage.cacheWrite;
+        totals.cost += usage.cost;
+        totals.turns = totals.turns! + (usage.turns ?? 0);
+    }
+    return totals;
+}
+
 export function clearActivity(name?: string): void {
     if (name) {
         agentActivity.delete(name);
+        agentUsage.delete(name);
     } else {
         agentActivity.clear();
+        agentUsage.clear();
     }
 }
 
@@ -37,11 +74,7 @@ function pushEvent(name: string, event: ActivityEvent): void {
     if (!agentActivity.has(name)) {
         agentActivity.set(name, []);
     }
-    const events = agentActivity.get(name)!;
-    events.push(event);
-    if (events.length > MAX_EVENTS_PER_AGENT) {
-        events.shift();
-    }
+    agentActivity.get(name)!.push(event);
 }
 
 /**
@@ -74,29 +107,30 @@ function parseJsonEvent(agentName: string, line: string): void {
     switch (event.type) {
         case "tool_execution_start": {
             const toolName = event.toolName || "unknown";
+            const toolArgs = event.args as Record<string, unknown> | undefined;
             let summary = toolName;
 
             // Extract useful info from args
-            if (toolName === "read" && event.args?.path) {
-                summary = `read ${shortenPath(event.args.path)}`;
-            } else if (toolName === "bash" && event.args?.command) {
-                const cmd = event.args.command;
+            if (toolName === "read" && toolArgs?.path) {
+                summary = `read ${shortenPath(toolArgs.path as string)}`;
+            } else if (toolName === "bash" && toolArgs?.command) {
+                const cmd = toolArgs.command as string;
                 summary = `bash ${cmd.length > 50 ? cmd.slice(0, 50) + "…" : cmd}`;
-            } else if (toolName === "edit" && event.args?.path) {
-                summary = `edit ${shortenPath(event.args.path)}`;
-            } else if (toolName === "write" && event.args?.path) {
-                summary = `write ${shortenPath(event.args.path)}`;
+            } else if (toolName === "edit" && toolArgs?.path) {
+                summary = `edit ${shortenPath(toolArgs.path as string)}`;
+            } else if (toolName === "write" && toolArgs?.path) {
+                summary = `write ${shortenPath(toolArgs.path as string)}`;
             } else if (toolName === "hive_notify") {
-                summary = `hive_notify "${event.args?.reason || ""}"`;
+                summary = `hive_notify "${toolArgs?.reason || ""}"`;
             } else if (toolName === "hive_blocker") {
-                summary = `hive_blocker "${event.args?.description || ""}"`;
+                summary = `hive_blocker "${toolArgs?.description || ""}"`;
             } else if (toolName === "hive_done") {
-                summary = `hive_done "${event.args?.summary || ""}"`;
+                summary = `hive_done "${toolArgs?.summary || ""}"`;
             } else if (toolName === "hive_progress") {
                 const parts: string[] = [];
-                if (event.args?.phase) parts.push(event.args.phase);
-                if (event.args?.percent != null) parts.push(`${event.args.percent}%`);
-                if (event.args?.detail) parts.push(event.args.detail);
+                if (toolArgs?.phase) parts.push(toolArgs.phase as string);
+                if (toolArgs?.percent != null) parts.push(`${toolArgs.percent}%`);
+                if (toolArgs?.detail) parts.push(toolArgs.detail as string);
                 summary = `hive_progress ${parts.join(" — ") || ""}`;
             }
 
@@ -104,52 +138,83 @@ function parseJsonEvent(agentName: string, line: string): void {
                 timestamp: now,
                 type: "tool_start",
                 summary,
-                detail: JSON.stringify(event.args),
+                detail: JSON.stringify(toolArgs),
+                toolName,
+                toolArgs,
             });
             break;
         }
 
         case "tool_execution_end": {
             const toolName = event.toolName || "unknown";
-            const isError = event.isError;
+            const isError = !!event.isError;
             const summary = isError ? `✗ ${toolName} failed` : `✓ ${toolName}`;
+            const toolResult = event.result != null ? String(event.result) : undefined;
 
             pushEvent(agentName, {
                 timestamp: now,
                 type: "tool_end",
                 summary,
                 detail: isError ? JSON.stringify(event.result) : undefined,
+                toolName,
+                isError,
+                toolResult: toolResult ? toolResult.slice(0, 1024) : undefined,
             });
             break;
         }
 
         case "message_end": {
-            // Extract a snippet of the assistant's response
             const msg = event.message;
-            if (msg?.role === "assistant" && msg?.content) {
-                for (const part of msg.content) {
-                    if (part.type === "text" && part.text?.trim()) {
-                        const text = part.text.trim();
-                        const snippet = text.length > 80
-                            ? text.slice(0, 80) + "…"
-                            : text;
-                        pushEvent(agentName, {
-                            timestamp: now,
-                            type: "message",
-                            summary: snippet,
-                        });
-                        break; // Only first text part
+            if (msg?.role === "assistant") {
+                // Accumulate usage
+                const usage = msg.usage;
+                if (usage) {
+                    if (!agentUsage.has(agentName)) {
+                        agentUsage.set(agentName, emptyUsage());
                     }
-                    if (part.type === "thinking" && part.thinking?.trim()) {
-                        const text = part.thinking.trim();
-                        const snippet = text.length > 80
-                            ? text.slice(0, 80) + "…"
-                            : text;
-                        pushEvent(agentName, {
-                            timestamp: now,
-                            type: "thinking",
-                            summary: snippet,
-                        });
+                    const stats = agentUsage.get(agentName)!;
+                    stats.input += usage.input || 0;
+                    stats.output += usage.output || 0;
+                    stats.cacheRead += usage.cacheRead || 0;
+                    stats.cacheWrite += usage.cacheWrite || 0;
+                    stats.cost += usage.cost?.total || 0;
+                    stats.contextTokens = usage.totalTokens || 0;
+                    stats.turns = stats.turns! + 1;
+                }
+
+                // Extract text/thinking from content
+                if (msg.content) {
+                    const tokens = usage
+                        ? { input: usage.input || 0, output: usage.output || 0 }
+                        : undefined;
+
+                    for (const part of msg.content) {
+                        if (part.type === "text" && part.text?.trim()) {
+                            const text = part.text.trim();
+                            const snippet = text.length > 80
+                                ? text.slice(0, 80) + "…"
+                                : text;
+                            pushEvent(agentName, {
+                                timestamp: now,
+                                type: "message",
+                                summary: snippet,
+                                messageText: text.slice(0, 4096),
+                                tokens,
+                            });
+                            break; // Only first text part
+                        }
+                        if (part.type === "thinking" && part.thinking?.trim()) {
+                            const text = part.thinking.trim();
+                            const snippet = text.length > 80
+                                ? text.slice(0, 80) + "…"
+                                : text;
+                            pushEvent(agentName, {
+                                timestamp: now,
+                                type: "thinking",
+                                summary: snippet,
+                                tokens,
+                            });
+                        }
                     }
                 }
             }
@@ -184,20 +249,4 @@ export function trackAgentOutput(agentName: string, stdout: NodeJS.ReadableStrea
             parseJsonEvent(agentName, buffer.trim());
         }
     });
-}
-
-function shortenPath(p: string): string {
-    // Replace home dir
-    const home = process.env.HOME || "";
-    if (home && p.startsWith(home)) {
-        p = "~" + p.slice(home.length);
-    }
-    // If still long, show last 2 segments
-    if (p.length > 50) {
-        const parts = p.split("/");
-        if (parts.length > 2) {
-            p = "…/" + parts.slice(-2).join("/");
-        }
-    }
-    return p;
 }

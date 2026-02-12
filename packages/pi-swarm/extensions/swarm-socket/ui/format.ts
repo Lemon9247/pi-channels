@@ -10,15 +10,25 @@ import type { Message } from "@mariozechner/pi-ai";
 
 // ─── Path Utilities ──────────────────────────────────────────────────
 
-/** Replace home directory with ~ for shorter display paths. */
+/** Replace home directory with ~ and truncate deep paths for display. */
 export function shortenPath(p: string): string {
     const home = os.homedir();
-    return p.startsWith(home) ? `~${p.slice(home.length)}` : p;
+    if (p.startsWith(home)) {
+        p = "~" + p.slice(home.length);
+    }
+    // Truncate long paths to last 2 segments
+    if (p.length > 50) {
+        const parts = p.split("/");
+        if (parts.length > 2) {
+            p = "…/" + parts.slice(-2).join("/");
+        }
+    }
+    return p;
 }
 
 // ─── Token Formatting ────────────────────────────────────────────────
 
-function formatTokens(count: number): string {
+export function formatTokens(count: number): string {
     if (count < 1000) return count.toString();
     if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
     if (count < 1000000) {
