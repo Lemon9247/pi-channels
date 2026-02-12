@@ -65,8 +65,8 @@ interface ResolvedAgent {
  * Handles model resolution (inline > agent file > default), tool flags,
  * system prompt assembly, and temp file management.
  *
- * Used by both detached and blocking spawn modes. The caller is responsible
- * for cleaning up tmpDir/tmpPromptPath on process exit.
+ * The caller is responsible for cleaning up tmpDir/tmpPromptPath on
+ * process exit.
  *
  * @param agentDef Agent definition (inline or pre-defined)
  * @param knownAgents Map of discovered agents (for pre-defined agent lookup)
