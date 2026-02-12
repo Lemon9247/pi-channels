@@ -591,11 +591,11 @@ describe("DashboardOverlay", () => {
             assert.ok(done.called, "q should close overlay from detail view");
         });
 
-        it("↓ increments scroll offset in detail view", () => {
+        it("↑ scrolls up from auto-scrolled bottom in detail view", () => {
             setupSwarm([{ name: "a1", status: "running" }]);
 
             // Add many events to make it scrollable
-            for (let i = 0; i < 20; i++) {
+            for (let i = 0; i < 40; i++) {
                 pushSyntheticEvent("a1", "tool_start", `read file${i}.ts`);
             }
 
@@ -608,19 +608,19 @@ describe("DashboardOverlay", () => {
                 focusAgent: "a1",
             });
 
-            // Initial render to populate lastMaxScroll
+            // Initial render — auto-scrolled to bottom
             overlay.render(80);
 
-            // Scroll down a few times
-            overlay.handleInput("\x1b[B");
-            overlay.handleInput("\x1b[B");
-            overlay.handleInput("\x1b[B");
+            // Scroll up a few times (disables auto-scroll)
+            overlay.handleInput("\x1b[A");
+            overlay.handleInput("\x1b[A");
+            overlay.handleInput("\x1b[A");
 
             const lines = overlay.render(80);
             const text = lines.join("\n");
 
-            // Should show scroll indicator
-            assert.ok(text.includes("above"), "Should show scroll-up indicator");
+            // Should show scroll-down indicator (content below)
+            assert.ok(text.includes("below"), "Should show scroll-down indicator after scrolling up");
 
         });
     });
@@ -773,6 +773,101 @@ describe("DashboardOverlay", () => {
             assert.ok(!text.includes("Task:"), "Should fall back to list view");
             assert.ok(text.includes("a1"), "Should show agents in list");
 
+        });
+    });
+
+    describe("instruct input", () => {
+        it("pressing 'i' in detail view activates input mode", () => {
+            setupSwarm([{ name: "a1", status: "running" }]);
+            const tui = mockTui();
+            const theme = mockTheme();
+            const done = mockDone();
+            const overlay = createOverlay({
+                tui: tui as any, theme, done: done.fn,
+                focusAgent: "a1",
+            });
+            overlay.render(80);
+
+            // Press 'i' to activate input
+            overlay.handleInput("i");
+            const lines = overlay.render(80);
+            const text = lines.join("\n");
+
+            // Should show input indicator
+            assert.ok(text.includes("▸"), "Should show input prompt");
+        });
+
+        it("typing in input mode updates the input text", () => {
+            setupSwarm([{ name: "a1", status: "running" }]);
+            const tui = mockTui();
+            const theme = mockTheme();
+            const done = mockDone();
+            const overlay = createOverlay({
+                tui: tui as any, theme, done: done.fn,
+                focusAgent: "a1",
+            });
+            overlay.render(80);
+
+            // Activate input and type
+            overlay.handleInput("i");
+            overlay.handleInput("h");
+            overlay.handleInput("e");
+            overlay.handleInput("l");
+            overlay.handleInput("p");
+
+            const lines = overlay.render(80);
+            const text = lines.join("\n");
+            assert.ok(text.includes("help"), "Should show typed text");
+        });
+
+        it("Escape in input mode cancels without closing overlay", () => {
+            setupSwarm([{ name: "a1", status: "running" }]);
+            const tui = mockTui();
+            const theme = mockTheme();
+            const done = mockDone();
+            const overlay = createOverlay({
+                tui: tui as any, theme, done: done.fn,
+                focusAgent: "a1",
+            });
+            overlay.render(80);
+
+            // Activate input
+            overlay.handleInput("i");
+            overlay.handleInput("x");
+
+            // Escape should cancel input, not close overlay
+            overlay.handleInput("\x1b");
+            assert.ok(!done.called, "Should not close overlay");
+
+            const lines = overlay.render(80);
+            const text = lines.join("\n");
+            // Should be back in detail view (still showing agent)
+            assert.ok(text.includes("a1"), "Should still show agent detail");
+            // Input prompt should be gone
+            assert.ok(!text.includes("▸"), "Input prompt should be hidden");
+        });
+
+        it("backspace deletes characters", () => {
+            setupSwarm([{ name: "a1", status: "running" }]);
+            const tui = mockTui();
+            const theme = mockTheme();
+            const done = mockDone();
+            const overlay = createOverlay({
+                tui: tui as any, theme, done: done.fn,
+                focusAgent: "a1",
+            });
+            overlay.render(80);
+
+            overlay.handleInput("i");
+            overlay.handleInput("a");
+            overlay.handleInput("b");
+            overlay.handleInput("c");
+            overlay.handleInput("\x7f"); // backspace
+
+            const lines = overlay.render(80);
+            const text = lines.join("\n");
+            assert.ok(text.includes("ab"), "Should show 'ab' after deleting 'c'");
+            assert.ok(!text.includes("abc"), "Should not show 'abc'");
         });
     });
 
