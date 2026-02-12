@@ -21,7 +21,10 @@ export function shortenPath(p: string): string {
 function formatTokens(count: number): string {
     if (count < 1000) return count.toString();
     if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
-    if (count < 1000000) return `${Math.round(count / 1000)}k`;
+    if (count < 1000000) {
+        const k = Math.round(count / 1000);
+        return k >= 1000 ? `${(count / 1000000).toFixed(1)}M` : `${k}k`;
+    }
     return `${(count / 1000000).toFixed(1)}M`;
 }
 
@@ -92,7 +95,7 @@ export function formatToolCall(
             const rawPath = (args.file_path || args.path || "...") as string;
             const filePath = shortenPath(rawPath);
             const content = (args.content || "") as string;
-            const lines = content.split("\n").length;
+            const lines = content.split("\n").length - (content.endsWith("\n") ? 1 : 0);
             let text = themeFg("muted", "write ") + themeFg("accent", filePath);
             if (lines > 1) text += themeFg("dim", ` (${lines} lines)`);
             return text;

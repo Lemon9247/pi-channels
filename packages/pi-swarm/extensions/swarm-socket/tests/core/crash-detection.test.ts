@@ -154,25 +154,6 @@ describe("crash detection", () => {
     });
 
     describe("crash broadcast message structure", () => {
-        it("agent_crashed message includes required fields", () => {
-            // Verify the message structure that would be sent to general channel.
-            // We can't test the actual channel send in unit tests (that's integration),
-            // but we can verify the data shape.
-            const crashData = {
-                type: "agent_crashed",
-                from: "system",
-                agent: "agent-a1",
-                exitCode: 1,
-                lastActivity: "bash ls; ✓ bash; Found files",
-            };
-
-            assert.equal(crashData.type, "agent_crashed");
-            assert.equal(crashData.from, "system");
-            assert.ok(typeof crashData.agent === "string");
-            assert.ok(typeof crashData.exitCode === "number");
-            assert.ok(typeof crashData.lastActivity === "string");
-        });
-
         it("crash info includes last 3 activity events", () => {
             pushSyntheticEvent("a1", "tool_start", "read file.ts");
             pushSyntheticEvent("a1", "tool_end", "✓ read");

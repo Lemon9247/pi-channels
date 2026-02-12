@@ -81,8 +81,6 @@ describe("buildAgentArgs", () => {
     it("builds basic args with task", () => {
         const def: AgentDef = {
             name: "agent-1",
-            role: "agent",
-            swarm: "test",
             task: "Do something",
         };
         const result = buildAgentArgs(def);
@@ -103,8 +101,6 @@ describe("buildAgentArgs", () => {
         );
         const def: AgentDef = {
             name: "a1",
-            role: "agent",
-            swarm: "test",
             task: "go",
             agent: "scout",
             model: "claude-sonnet-4-5",
@@ -125,8 +121,6 @@ describe("buildAgentArgs", () => {
         );
         const def: AgentDef = {
             name: "a1",
-            role: "agent",
-            swarm: "test",
             task: "go",
             agent: "scout",
         };
@@ -142,8 +136,6 @@ describe("buildAgentArgs", () => {
     it("no --model flag when neither inline nor agent specifies model", () => {
         const def: AgentDef = {
             name: "a1",
-            role: "agent",
-            swarm: "test",
             task: "go",
         };
         const result = buildAgentArgs(def);
@@ -159,8 +151,6 @@ describe("buildAgentArgs", () => {
         );
         const def: AgentDef = {
             name: "a1",
-            role: "agent",
-            swarm: "test",
             task: "go",
             agent: "worker",
             tools: ["read", "bash", "edit", "write"],
@@ -179,8 +169,6 @@ describe("buildAgentArgs", () => {
         );
         const def: AgentDef = {
             name: "a1",
-            role: "agent",
-            swarm: "test",
             task: "go",
             agent: "worker",
         };
@@ -195,8 +183,6 @@ describe("buildAgentArgs", () => {
     it("no --tools flag when no tools specified anywhere", () => {
         const def: AgentDef = {
             name: "a1",
-            role: "agent",
-            swarm: "test",
             task: "go",
         };
         const result = buildAgentArgs(def);
@@ -208,8 +194,6 @@ describe("buildAgentArgs", () => {
     it("writes system prompt to temp file", () => {
         const def: AgentDef = {
             name: "a1",
-            role: "agent",
-            swarm: "test",
             task: "go",
             systemPrompt: "You are a helpful agent.",
         };
@@ -226,8 +210,6 @@ describe("buildAgentArgs", () => {
         );
         const def: AgentDef = {
             name: "a1",
-            role: "agent",
-            swarm: "test",
             task: "go",
             agent: "scout",
             // No inline systemPrompt — should use agent file's
@@ -242,8 +224,6 @@ describe("buildAgentArgs", () => {
     it("appends promptSuffix after system prompt", () => {
         const def: AgentDef = {
             name: "a1",
-            role: "agent",
-            swarm: "test",
             task: "go",
             systemPrompt: "Base prompt.",
         };
@@ -263,8 +243,6 @@ describe("buildAgentArgs", () => {
         );
         const def: AgentDef = {
             name: "a1",
-            role: "agent",
-            swarm: "test",
             task: "go",
             agent: "scout",
         };
@@ -277,8 +255,6 @@ describe("buildAgentArgs", () => {
     it("source is 'unknown' when agent not found in known agents", () => {
         const def: AgentDef = {
             name: "a1",
-            role: "agent",
-            swarm: "test",
             task: "go",
             agent: "nonexistent",
         };
@@ -295,8 +271,6 @@ describe("buildAgentArgs", () => {
         );
         const def: AgentDef = {
             name: "a1",
-            role: "agent",
-            swarm: "test",
             task: "go",
             agent: "scout",
         };

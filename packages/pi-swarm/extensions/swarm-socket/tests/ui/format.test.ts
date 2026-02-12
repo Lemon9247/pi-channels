@@ -157,7 +157,7 @@ describe("formatToolCall", () => {
     it("formats write with line count", () => {
         const result = formatToolCall("write", { path: "/tmp/out.ts", content: "a\nb\nc\n" }, plainFg);
         assert.ok(result.includes("write "));
-        assert.ok(result.includes("(4 lines)"));
+        assert.ok(result.includes("(3 lines)"));
     });
 
     it("formats edit with path", () => {

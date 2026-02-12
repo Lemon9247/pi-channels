@@ -14,7 +14,6 @@ import {
     discoverAgents,
     findNearestProjectAgentsDir,
     parseFrontmatter,
-    type AgentScope,
 } from "../../core/agents.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────

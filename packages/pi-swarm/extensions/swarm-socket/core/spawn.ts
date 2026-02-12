@@ -40,16 +40,21 @@ export interface SingleResult {
     step?: number;
 }
 
+/** Base agent definition — used by both blocking and detached spawn. */
 export interface AgentDef {
     name: string;
-    role: "agent" | "coordinator";
-    swarm: string;
     task: string;
     agent?: string;
     systemPrompt?: string;
     tools?: string[];
     model?: string;
     cwd?: string;
+}
+
+/** Swarm-specific agent definition — adds role and swarm assignment. */
+export interface SwarmAgentDef extends AgentDef {
+    role: "agent" | "coordinator";
+    swarm: string;
 }
 
 /** Callback for streaming updates during blocking spawn. */
@@ -168,7 +173,7 @@ function cleanupTempFiles(tmpPromptPath: string, tmpDir: string): void {
  * receives channel configuration via environment variables.
  */
 export function spawnAgent(
-    agentDef: AgentDef,
+    agentDef: SwarmAgentDef,
     channelGroupPath: string,
     taskDirPath: string | undefined,
     defaultCwd: string,
@@ -329,7 +334,7 @@ export async function spawnAgentBlocking(
             });
 
             proc.stderr!.on("data", (data: Buffer) => {
-                result.stderr += data.toString();
+                result.stderr = (result.stderr + data.toString()).slice(-4096);
             });
 
             proc.on("close", (code) => {
@@ -337,21 +342,30 @@ export async function spawnAgentBlocking(
                 resolve(code ?? 0);
             });
 
-            proc.on("error", () => {
+            proc.on("error", (err) => {
+                result.errorMessage = err.message;
                 resolve(1);
             });
 
+            let abortHandler: (() => void) | null = null;
             if (signal) {
-                const killProc = () => {
+                abortHandler = () => {
                     wasAborted = true;
                     proc.kill("SIGTERM");
                     setTimeout(() => {
                         if (!proc.killed) proc.kill("SIGKILL");
                     }, 5000);
                 };
-                if (signal.aborted) killProc();
-                else signal.addEventListener("abort", killProc, { once: true });
+                if (signal.aborted) abortHandler();
+                else signal.addEventListener("abort", abortHandler, { once: true });
             }
+
+            // Clean up abort listener on normal exit
+            proc.on("close", () => {
+                if (abortHandler && signal) {
+                    signal.removeEventListener("abort", abortHandler);
+                }
+            });
         });
 
         result.exitCode = exitCode;
