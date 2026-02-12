@@ -99,17 +99,18 @@ export class DashboardOverlay implements Component, Focusable {
     // ─── Render ─────────────────────────────────────────────────────
 
     render(width: number): string[] {
+        const w = Math.min(width, MAX_OVERLAY_WIDTH);
         this.refreshAgentList();
 
         if (this.cachedAgents.length === 0) {
-            return this.renderEmpty(width);
+            return this.renderEmpty(w);
         }
 
         switch (this.viewMode) {
             case "list":
-                return this.renderList(width);
+                return this.renderList(w);
             case "detail":
-                return this.renderDetail(width);
+                return this.renderDetail(w);
         }
     }
 
@@ -746,7 +747,7 @@ interface OverlayContext {
     ui: {
         custom<T>(
             factory: (tui: TUI, theme: Theme, keybindings: unknown, done: (result: T) => void) => Component,
-            options: { overlay: boolean; overlayOptions: { anchor: string; width: string; maxHeight: string } },
+            options?: { overlay?: boolean },
         ): Promise<T>;
     };
 }
@@ -763,14 +764,6 @@ export function openDashboardOverlay(ctx: OverlayContext, focusAgent?: string): 
     ctx.ui.custom(
         (tui: TUI, theme: Theme, _keybindings: unknown, done: (result: void) => void) => {
             return new DashboardOverlay({ tui, theme, done, focusAgent });
-        },
-        {
-            overlay: true,
-            overlayOptions: {
-                anchor: "center",
-                width: MAX_OVERLAY_WIDTH,
-                maxHeight: "80%",
-            },
         },
     );
 }
