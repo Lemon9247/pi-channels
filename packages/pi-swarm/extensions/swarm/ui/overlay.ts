@@ -12,7 +12,7 @@
  */
 
 import type { TUI, Component, Focusable } from "@mariozechner/pi-tui";
-import { matchesKey, Key, visibleWidth, truncateToWidth, CURSOR_MARKER, wrapTextWithAnsi } from "@mariozechner/pi-tui";
+import { matchesKey, Key, visibleWidth, truncateToWidth, CURSOR_MARKER } from "@mariozechner/pi-tui";
 import { getSwarmState, type AgentInfo } from "../core/state.js";
 import { getAgentActivity, getAgentUsage, getAggregateUsage, type ActivityEvent } from "./activity.js";
 import { formatTokens, formatUsageStats, statusIcon, formatAge } from "./format.js";
@@ -263,24 +263,18 @@ export class DashboardOverlay implements Component, Focusable {
             contentLines.push(t.fg("accent", `  ⟳ ${parts.join(" — ")}`));
         }
 
-        // Task
+        // Task (truncated to 3 lines)
         if (agent.task) {
             contentLines.push("");
             contentLines.push(t.bold(t.fg("text", "  Task:")));
-            const taskLines = this.wrapText(agent.task, iw - 6);
-            for (const line of taskLines.slice(0, 5)) {
-                contentLines.push("  " + t.fg("muted", line));
-            }
-            if (taskLines.length > 5) {
-                contentLines.push("  " + t.fg("dim", `… (${taskLines.length - 5} more lines)`));
-            }
+            const taskOneLine = agent.task.replace(/\n/g, " ");
+            contentLines.push("  " + t.fg("muted", taskOneLine));
         }
 
-        // Activity stream
+        // Activity stream — one line per event, always truncated
         contentLines.push("");
         contentLines.push(t.bold(t.fg("text", "  Activity:")));
         const activity = getAgentActivity(agent.name);
-        const contentWidth = iw - 4; // padding inside borders
 
         if (activity.length === 0) {
             contentLines.push(t.fg("dim", "  (waiting for activity...)"));
@@ -291,79 +285,30 @@ export class DashboardOverlay implements Component, Focusable {
 
                 switch (ev.type) {
                     case "thinking": {
-                        const text = ev.thinkingText || ev.summary;
-                        const prefix = "💭 ";
-                        const firstLineWidth = contentWidth - visibleWidth(ageStr) - visibleWidth(prefix);
-                        const wrappedLines = this.wrapText(text, firstLineWidth);
-                        if (wrappedLines.length > 0) {
-                            contentLines.push("  " + ageStr + t.fg("dim", prefix + wrappedLines[0]));
-                            const indentWidth = visibleWidth("  " + ageStr + prefix);
-                            const indent = " ".repeat(indentWidth);
-                            for (let i = 1; i < Math.min(wrappedLines.length, 6); i++) {
-                                contentLines.push(t.fg("dim", indent + wrappedLines[i]));
-                            }
-                            if (wrappedLines.length > 6) {
-                                contentLines.push(t.fg("dim", indent + `… (${wrappedLines.length - 6} more lines)`));
-                            }
-                        }
+                        const text = (ev.summary || "").replace(/\n/g, " ");
+                        contentLines.push("  " + ageStr + t.fg("dim", "💭 " + text));
                         break;
                     }
-
                     case "message": {
-                        const text = ev.messageText || ev.summary;
-                        const prefix = "💬 ";
-                        const firstLineWidth = contentWidth - visibleWidth(ageStr) - visibleWidth(prefix);
-                        const wrappedLines = this.wrapText(text, firstLineWidth);
-                        if (wrappedLines.length > 0) {
-                            contentLines.push("  " + ageStr + t.fg("text", prefix + wrappedLines[0]));
-                            const indentWidth = visibleWidth("  " + ageStr + prefix);
-                            const indent = " ".repeat(indentWidth);
-                            for (let i = 1; i < Math.min(wrappedLines.length, 10); i++) {
-                                contentLines.push(t.fg("text", indent + wrappedLines[i]));
-                            }
-                            if (wrappedLines.length > 10) {
-                                contentLines.push(t.fg("dim", indent + `… (${wrappedLines.length - 10} more lines)`));
-                            }
-                        }
+                        const text = (ev.summary || "").replace(/\n/g, " ");
+                        contentLines.push("  " + ageStr + t.fg("text", "💬 " + text));
                         break;
                     }
-
                     case "tool_start": {
-                        let formatted: string;
-                        if (ev.toolName) {
-                            formatted = this.formatToolStart(ev.toolName, ev.toolArgs || {});
-                        } else {
-                            formatted = ev.summary;
-                        }
+                        const formatted = ev.toolName
+                            ? this.formatToolStart(ev.toolName, ev.toolArgs || {})
+                            : ev.summary;
                         contentLines.push("  " + ageStr + t.fg("accent", "▶ " + formatted));
                         break;
                     }
-
                     case "tool_end": {
                         const color = ev.isError ? "error" : "success";
                         const marker = ev.isError ? "✗" : "✓";
-                        const resultIndent = "  " + " ".repeat(visibleWidth(ageStr));
-
-                        if (ev.toolResult) {
-                            // Show tool result (word-wrapped, capped)
-                            const resultText = ev.toolResult;
-                            const maxResultWidth = contentWidth - visibleWidth(resultIndent) - 2;
-                            const resultLines = this.wrapText(resultText, maxResultWidth);
-                            const maxLines = ev.isError ? 10 : 4;
-
-                            if (resultLines.length <= maxLines) {
-                                for (const line of resultLines) {
-                                    contentLines.push(resultIndent + t.fg(color, `  ${line}`));
-                                }
-                            } else {
-                                for (let i = 0; i < maxLines; i++) {
-                                    contentLines.push(resultIndent + t.fg(color, `  ${resultLines[i]}`));
-                                }
-                                contentLines.push(resultIndent + t.fg("dim", `  … (${resultLines.length - maxLines} more lines)`));
-                            }
-                        } else {
-                            contentLines.push(resultIndent + t.fg(color, `${marker} ${ev.toolName || ""}`));
-                        }
+                        const name = ev.toolName || "";
+                        const preview = ev.isError && ev.toolResult
+                            ? ` ${ev.toolResult.replace(/\n/g, " ").slice(0, 60)}`
+                            : "";
+                        contentLines.push("  " + ageStr + t.fg(color, `${marker} ${name}${preview}`));
                         break;
                     }
                 }
@@ -619,12 +564,15 @@ export class DashboardOverlay implements Component, Focusable {
 
     // ─── Helpers ────────────────────────────────────────────────────
 
-    /** Pad a content string into a bordered row */
+    /** Pad/truncate a content string into a bordered row */
     private row(content: string, width: number): string {
         const t = this.theme;
         const iw = width - 2;
         const vw = visibleWidth(content);
-        const padding = Math.max(0, iw - vw);
+        if (vw > iw) {
+            return t.fg("border", "│") + truncateToWidth(content, iw) + t.fg("border", "│");
+        }
+        const padding = iw - vw;
         return t.fg("border", "│") + content + " ".repeat(padding) + t.fg("border", "│");
     }
 
@@ -704,30 +652,6 @@ export class DashboardOverlay implements Component, Focusable {
             default:
                 return name;
         }
-    }
-
-    private wrapText(text: string, maxWidth: number): string[] {
-        if (maxWidth <= 0) return [text];
-        const lines: string[] = [];
-        // Split on newlines first, then word-wrap each line
-        for (const rawLine of text.split("\n")) {
-            if (rawLine.length === 0) {
-                lines.push("");
-                continue;
-            }
-            const words = rawLine.split(/(\s+)/);
-            let current = "";
-            for (const word of words) {
-                if (current.length + word.length > maxWidth && current.length > 0) {
-                    lines.push(current);
-                    current = word.trimStart();
-                } else {
-                    current += word;
-                }
-            }
-            if (current) lines.push(current);
-        }
-        return lines;
     }
 
     private startRefresh(): void {
