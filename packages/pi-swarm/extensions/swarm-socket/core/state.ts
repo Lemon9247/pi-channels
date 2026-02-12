@@ -23,6 +23,8 @@ export interface AgentInfo {
     progressPhase?: string;
     progressPercent?: number;
     progressDetail?: string;
+    /** Agent name key into the activity store's usage map. */
+    usageKey?: string;
 }
 
 export interface SwarmState {

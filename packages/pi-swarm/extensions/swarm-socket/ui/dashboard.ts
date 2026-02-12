@@ -7,11 +7,19 @@
  */
 
 import { getSwarmState, type AgentInfo, type AgentStatus } from "../core/state.js";
-import { getAgentActivity } from "./activity.js";
+import { getAgentActivity, getAgentUsage, getAggregateUsage } from "./activity.js";
+import { formatUsageStats } from "./format.js";
 
 // Store ctx reference for dashboard updates triggered outside tool execution
 let dashboardCtx: any = null;
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
+
+/** Compact token count for widget display (e.g. "12k", "1.2M"). */
+function compactTokens(count: number): string {
+    if (count < 1000) return count.toString();
+    if (count < 1000000) return `${Math.round(count / 1000)}k`;
+    return `${(count / 1000000).toFixed(1)}M`;
+}
 
 function statusIcon(status: AgentStatus): string {
     switch (status) {
@@ -63,13 +71,15 @@ export function updateDashboard(ctx?: any): void {
         stopRefresh();
     }
 
-    // Status bar: compact summary
+    // Status bar: compact summary with aggregate cost
     const agents = Array.from(state.agents.values());
     const { total, done, running, blocked, failed } = summarize(agents);
     let statusText = `🐝 ${done}/${total}`;
     if (running > 0) statusText += ` ⏳${running}`;
     if (blocked > 0) statusText += ` ⚠${blocked}`;
     if (failed > 0) statusText += ` ✗${failed}`;
+    const aggregate = getAggregateUsage();
+    if (aggregate.cost > 0) statusText += ` $${aggregate.cost.toFixed(2)}`;
     if (done === total) statusText += " ✓";
     c.ui.setStatus("swarm", statusText);
 
@@ -100,6 +110,17 @@ export function updateDashboard(ctx?: any): void {
             const icon = statusIcon(agent.status);
             const role = agent.role === "coordinator" ? "co" : "ag";
 
+            // Compact usage: "3t ↑12k $0.02"
+            const usage = getAgentUsage(agent.name);
+            let usageStr = "";
+            if (usage.turns) {
+                const parts: string[] = [];
+                parts.push(`${usage.turns}t`);
+                if (usage.input) parts.push(`↑${compactTokens(usage.input)}`);
+                if (usage.cost) parts.push(`$${usage.cost.toFixed(2)}`);
+                usageStr = parts.join(" ");
+            }
+
             let detail = "";
             if (agent.status === "done" && agent.doneSummary) {
                 detail = agent.doneSummary.length > 50
@@ -128,7 +149,8 @@ export function updateDashboard(ctx?: any): void {
                 }
             }
 
-            widgetLines.push(`   ${branch}${icon} ${agent.name} (${role}) ${detail}`);
+            const usagePart = usageStr ? ` ${usageStr} ` : " ";
+            widgetLines.push(`   ${branch}${icon} ${agent.name} (${role})${usagePart}${detail}`);
         }
     }
 
