@@ -641,8 +641,10 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                 if (getSwarmGeneration() !== gen) return;
                 const current = getSwarmState();
                 if (!current) return;
+                let anyStuck = false;
                 for (const agent of current.agents.values()) {
                     if (agent.status === "starting") {
+                        anyStuck = true;
                         updateAgentStatus(agent.name, "crashed");
                         bufferedSendMessage(pi,
                             {
@@ -654,7 +656,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                         );
                     }
                 }
-                updateDashboard(ctx);
+                if (anyStuck) updateDashboard(ctx);
             }, 30_000);
 
             // Initialize dashboard
