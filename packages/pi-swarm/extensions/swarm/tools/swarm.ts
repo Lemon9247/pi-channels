@@ -35,7 +35,7 @@ import { getIdentity } from "../core/identity.js";
 import { scaffoldTaskDir, scaffoldCoordinatorSubDir, type ScaffoldResult } from "../core/scaffold.js";
 import { spawnAgent, spawnAgentBlocking, type AgentDef, type SingleResult } from "../core/spawn.js";
 import { discoverAgents, type AgentConfig, type AgentScope } from "../core/agents.js";
-import { updateDashboard } from "../ui/dashboard.js";
+import { updateDashboard, clearDashboard } from "../ui/dashboard.js";
 import { isDashboardOpen } from "../ui/overlay.js";
 import {
     trackAgentOutput, clearActivity, pushSyntheticEvent, getAgentActivity,
@@ -987,6 +987,11 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                     { deliverAs: "followUp", triggerTurn: true },
                 );
                 updateDashboard(ctx);
+                // Clear the widget after a brief delay so the user sees the final state
+                setTimeout(() => {
+                    if (getSwarmGeneration() !== gen) return;
+                    clearDashboard(true);
+                }, 3000);
             };
 
             state.onBlocker = (agentName, description) => {
