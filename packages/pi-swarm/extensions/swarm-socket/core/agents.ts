@@ -1,14 +1,20 @@
 /**
- * Agent discovery for swarm-socket extension.
+ * Agent Discovery
  *
- * Re-exports the agent discovery logic from the subagent extension.
- * Agents are .md files in ~/.pi/agent/agents/ with frontmatter
- * specifying name, description, tools, and model.
+ * Discovers agent definitions from ~/.pi/agent/agents/ (user) and
+ * .pi/agents/ (project-local). Supports scope control for filtering
+ * by source. Project agents override user agents of the same name.
+ *
+ * Ported from the subagent extension with scope-aware API.
  */
 
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+
+// ─── Types ───────────────────────────────────────────────────────────
+
+export type AgentScope = "user" | "project" | "both";
 
 export interface AgentConfig {
     name: string;
@@ -16,19 +22,25 @@ export interface AgentConfig {
     tools?: string[];
     model?: string;
     systemPrompt: string;
+    source: "user" | "project";
     filePath: string;
 }
+
+export interface AgentDiscoveryResult {
+    agents: Map<string, AgentConfig>;
+    projectAgentsDir: string | null;
+}
+
+// ─── Frontmatter Parser ─────────────────────────────────────────────
 
 /**
  * Parse simple YAML frontmatter from markdown.
  * Returns { frontmatter, body } where frontmatter is key-value pairs.
  *
- * LIMITATION: This is a minimal parser that only handles simple `key: value` pairs.
- * It does NOT handle: quoted values (quotes become part of the value), multi-line
- * values, YAML lists (e.g. `- item`), nested objects, or other YAML features.
- * Tools are expected as a comma-separated list on a single line (e.g. `tools: read, bash, edit`).
+ * Handles simple `key: value` pairs. Tools are expected as a
+ * comma-separated list on a single line (e.g. `tools: read, bash, edit`).
  */
-function parseFrontmatter(content: string): { frontmatter: Record<string, string>; body: string } {
+export function parseFrontmatter(content: string): { frontmatter: Record<string, string>; body: string } {
     if (!content.startsWith("---")) {
         return { frontmatter: {}, body: content };
     }
@@ -55,28 +67,25 @@ function parseFrontmatter(content: string): { frontmatter: Record<string, string
     return { frontmatter, body };
 }
 
-/**
- * Discover agents from ~/.pi/agent/agents/ directory.
- * Returns a map of agent name → config.
- */
-export function discoverAgents(cwd: string): Map<string, AgentConfig> {
-    const agentDir = path.join(os.homedir(), ".pi", "agent", "agents");
-    const agents = new Map<string, AgentConfig>();
+// ─── Directory Loading ───────────────────────────────────────────────
 
-    if (!fs.existsSync(agentDir)) return agents;
+function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig[] {
+    const agents: AgentConfig[] = [];
+
+    if (!fs.existsSync(dir)) return agents;
 
     let entries: fs.Dirent[];
     try {
-        entries = fs.readdirSync(agentDir, { withFileTypes: true });
+        entries = fs.readdirSync(dir, { withFileTypes: true });
     } catch {
         return agents;
     }
 
     for (const entry of entries) {
         if (!entry.name.endsWith(".md")) continue;
-        if (!entry.isFile()) continue;
+        if (!entry.isFile() && !entry.isSymbolicLink()) continue;
 
-        const filePath = path.join(agentDir, entry.name);
+        const filePath = path.join(dir, entry.name);
         let content: string;
         try {
             content = fs.readFileSync(filePath, "utf-8");
@@ -93,60 +102,77 @@ export function discoverAgents(cwd: string): Map<string, AgentConfig> {
             .map((t: string) => t.trim())
             .filter(Boolean);
 
-        agents.set(frontmatter.name, {
+        agents.push({
             name: frontmatter.name,
             description: frontmatter.description,
             tools: tools && tools.length > 0 ? tools : undefined,
             model: frontmatter.model,
             systemPrompt: body,
+            source,
             filePath,
         });
     }
 
-    // Also check project-level .pi/agents/
-    // Walk up from cwd looking for .pi/agents/, capped at 10 levels to avoid
-    // traversing the entire filesystem when no project-level agents exist.
-    const MAX_WALK_DEPTH = 10;
-    let projectDir = cwd;
+    return agents;
+}
+
+// ─── Project Agent Resolution ────────────────────────────────────────
+
+/**
+ * Walk up from cwd to find the nearest .pi/agents/ directory.
+ * Returns null if none found. Capped at 10 levels to avoid
+ * traversing the entire filesystem.
+ */
+export function findNearestProjectAgentsDir(cwd: string): string | null {
+    const MAX_DEPTH = 10;
+    let currentDir = cwd;
     let depth = 0;
-    while (depth < MAX_WALK_DEPTH) {
-        const candidate = path.join(projectDir, ".pi", "agents");
-        if (fs.existsSync(candidate)) {
-            try {
-                const entries = fs.readdirSync(candidate, { withFileTypes: true });
-                for (const entry of entries) {
-                    if (!entry.name.endsWith(".md") || !entry.isFile()) continue;
-                    const filePath = path.join(candidate, entry.name);
-                    let content: string;
-                    try {
-                        content = fs.readFileSync(filePath, "utf-8");
-                    } catch {
-                        continue;
-                    }
-                    const { frontmatter, body } = parseFrontmatter(content);
-                    if (!frontmatter.name || !frontmatter.description) continue;
-                    const tools = frontmatter.tools
-                        ?.split(",")
-                        .map((t: string) => t.trim())
-                        .filter(Boolean);
-                    // Project agents override user agents
-                    agents.set(frontmatter.name, {
-                        name: frontmatter.name,
-                        description: frontmatter.description,
-                        tools: tools && tools.length > 0 ? tools : undefined,
-                        model: frontmatter.model,
-                        systemPrompt: body,
-                        filePath,
-                    });
-                }
-            } catch { /* ignore */ }
-            break;
-        }
-        const parent = path.dirname(projectDir);
-        if (parent === projectDir) break; // filesystem root
-        projectDir = parent;
+
+    while (depth < MAX_DEPTH) {
+        const candidate = path.join(currentDir, ".pi", "agents");
+        try {
+            if (fs.statSync(candidate).isDirectory()) return candidate;
+        } catch { /* doesn't exist, keep walking */ }
+
+        const parent = path.dirname(currentDir);
+        if (parent === currentDir) return null; // filesystem root
+        currentDir = parent;
         depth++;
     }
 
-    return agents;
+    return null;
+}
+
+// ─── Discovery ───────────────────────────────────────────────────────
+
+/**
+ * Discover agents from user and/or project directories.
+ *
+ * Scope controls which sources are included:
+ * - "user": only ~/.pi/agent/agents/
+ * - "project": only .pi/agents/ (walked up from cwd)
+ * - "both": user + project (project overrides user on name collision)
+ *
+ * Returns a Map keyed by agent name, plus the resolved project agents dir.
+ */
+export function discoverAgents(cwd: string, scope: AgentScope = "both"): AgentDiscoveryResult {
+    const userDir = path.join(os.homedir(), ".pi", "agent", "agents");
+    const projectAgentsDir = scope === "user" ? null : findNearestProjectAgentsDir(cwd);
+
+    const userAgents = scope === "project" ? [] : loadAgentsFromDir(userDir, "user");
+    const projectAgents = scope === "user" || !projectAgentsDir ? [] : loadAgentsFromDir(projectAgentsDir, "project");
+
+    const agents = new Map<string, AgentConfig>();
+
+    // User agents go in first
+    if (scope !== "project") {
+        for (const agent of userAgents) agents.set(agent.name, agent);
+    }
+
+    // Project agents override user agents on name collision
+    if (scope !== "user") {
+        for (const agent of projectAgents) agents.set(agent.name, agent);
+    }
+
+    return { agents, projectAgentsDir };
 }

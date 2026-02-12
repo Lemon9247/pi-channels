@@ -34,9 +34,9 @@ import {
 import { getIdentity } from "../core/identity.js";
 import { scaffoldTaskDir, scaffoldCoordinatorSubDir, type ScaffoldResult } from "../core/scaffold.js";
 import { spawnAgent } from "../core/spawn.js";
-import { discoverAgents } from "../core/agents.js";
+import { discoverAgents, type AgentConfig } from "../core/agents.js";
 import { updateDashboard } from "../ui/dashboard.js";
-import { trackAgentOutput, clearActivity, pushSyntheticEvent } from "../ui/activity.js";
+import { trackAgentOutput, clearActivity, pushSyntheticEvent, getAgentActivity } from "../ui/activity.js";
 
 // Agent definition — pre-defined by name or inline
 const AgentDef = Type.Object({
@@ -456,7 +456,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
             }
 
             // Cache agent discovery once for all spawns
-            const knownAgents = discoverAgents(ctx.cwd);
+            const { agents: knownAgents } = discoverAgents(ctx.cwd, "both");
 
             // Spawn all agents
             for (const agentDef of params.agents) {
@@ -486,11 +486,36 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                             updateAgentStatus(agentDef.name, "done");
                         } else {
                             updateAgentStatus(agentDef.name, "crashed");
+
+                            // Build crash info with last activity
+                            const activity = getAgentActivity(agentDef.name);
+                            const lastActivity = activity.slice(-3).map(e => e.summary).join("; ");
+                            const crashInfo = `💀 **${agentDef.name}** crashed (exit code ${code}).` +
+                                (lastActivity ? `\nLast activity: ${lastActivity}` : "") +
+                                (stderr ? `\n\nLast stderr:\n\`\`\`\n${stderr.slice(-500)}\n\`\`\`` : "");
+
+                            // Broadcast to general channel so other agents can adjust
+                            const generalClient = current.queenClients.get(GENERAL_CHANNEL);
+                            if (generalClient?.connected) {
+                                try {
+                                    generalClient.send({
+                                        msg: `Agent ${agentDef.name} crashed (exit code ${code})`,
+                                        data: {
+                                            type: "agent_crashed",
+                                            from: "system",
+                                            agent: agentDef.name,
+                                            exitCode: code,
+                                            lastActivity: lastActivity || undefined,
+                                        },
+                                    });
+                                } catch { /* best effort */ }
+                            }
+
+                            // Active interrupt to queen
                             pi.sendMessage(
                                 {
                                     customType: "swarm-blocker",
-                                    content: `💀 **${agentDef.name}** crashed (exit code ${code}).` +
-                                        (stderr ? `\n\nLast stderr:\n\`\`\`\n${stderr.slice(-500)}\n\`\`\`` : ""),
+                                    content: crashInfo,
                                     display: true,
                                 },
                                 { deliverAs: "steer" },
@@ -503,6 +528,25 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                 proc.on("error", (err: Error) => {
                     if (getSwarmGeneration() !== gen) return;
                     updateAgentStatus(agentDef.name, "crashed");
+
+                    // Broadcast spawn failure to general channel
+                    const current = getSwarmState();
+                    const generalClient = current?.queenClients.get(GENERAL_CHANNEL);
+                    if (generalClient?.connected) {
+                        try {
+                            generalClient.send({
+                                msg: `Agent ${agentDef.name} failed to start: ${err.message}`,
+                                data: {
+                                    type: "agent_crashed",
+                                    from: "system",
+                                    agent: agentDef.name,
+                                    exitCode: -1,
+                                    error: err.message,
+                                },
+                            });
+                        } catch { /* best effort */ }
+                    }
+
                     pi.sendMessage(
                         {
                             customType: "swarm-blocker",
