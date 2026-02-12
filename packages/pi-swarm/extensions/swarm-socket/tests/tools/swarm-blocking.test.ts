@@ -21,6 +21,12 @@ import {
     formatUsageStats,
 } from "../../ui/format.js";
 import { feedRawEvent, getAgentActivity, clearActivity } from "../../ui/activity.js";
+import {
+    shouldBlock,
+    mapWithConcurrencyLimit,
+    aggregateUsage,
+    formatBlockingResult,
+} from "../../tools/swarm.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
@@ -84,20 +90,6 @@ function makeSingleResult(overrides?: Partial<SingleResult>): SingleResult {
 // P3-T12: Tests for auto-detection — 1 agent → blocking, 2+ → async, chain → blocking
 
 describe("shouldBlock auto-detection (T12)", () => {
-    // We test the logic directly since it's a pure function.
-    // Reimplemented here to match the function in swarm.ts.
-    function shouldBlock(params: {
-        blocking?: boolean;
-        chain?: unknown[];
-        agents: unknown[];
-        taskDir?: unknown;
-    }): boolean {
-        if (params.blocking !== undefined) return params.blocking;
-        if (params.chain && params.chain.length > 0) return true;
-        if (params.agents.length === 1 && !params.taskDir) return true;
-        return false;
-    }
-
     it("1 agent without taskDir → blocking", () => {
         assert.equal(shouldBlock({ agents: [{}] }), true);
     });
@@ -141,28 +133,6 @@ describe("shouldBlock auto-detection (T12)", () => {
 // ─── mapWithConcurrencyLimit (T10) ──────────────────────────────────
 
 describe("mapWithConcurrencyLimit (T10)", () => {
-    // Reimplemented for testing
-    async function mapWithConcurrencyLimit<T, R>(
-        items: T[],
-        limit: number,
-        fn: (item: T) => Promise<R>,
-    ): Promise<R[]> {
-        const results: R[] = new Array(items.length);
-        let index = 0;
-        async function worker(): Promise<void> {
-            while (index < items.length) {
-                const i = index++;
-                results[i] = await fn(items[i]);
-            }
-        }
-        const workers = Array.from(
-            { length: Math.min(limit, items.length) },
-            () => worker(),
-        );
-        await Promise.all(workers);
-        return results;
-    }
-
     it("processes all items", async () => {
         const items = [1, 2, 3, 4, 5];
         const results = await mapWithConcurrencyLimit(items, 2, async (x) => x * 2);
@@ -204,7 +174,7 @@ describe("mapWithConcurrencyLimit (T10)", () => {
         assert.deepEqual(results, [50, 10, 30, 20, 40]);
     });
 
-    it("continues on failure (rejects when function throws)", async () => {
+    it("rejects when function throws (uncaught)", async () => {
         const items = [1, 2, 3];
         try {
             await mapWithConcurrencyLimit(items, 2, async (x) => {
@@ -216,27 +186,27 @@ describe("mapWithConcurrencyLimit (T10)", () => {
             assert.equal(err.message, "boom");
         }
     });
+
+    it("continues on failure when caller catches per-item", async () => {
+        const items = [1, 2, 3];
+        const results = await mapWithConcurrencyLimit(items, 2, async (x) => {
+            if (x === 2) throw new Error("boom");
+            return x;
+        }).catch(() => null) || await mapWithConcurrencyLimit(
+            items, 2,
+            (x) => (async () => {
+                if (x === 2) throw new Error("boom");
+                return x;
+            })().catch((err): number => -1),
+        );
+        // Wrapping fn in catch returns -1 for failed item
+        assert.deepEqual(results, [1, -1, 3]);
+    });
 });
 
 // ─── aggregateUsage ─────────────────────────────────────────────────
 
 describe("aggregateUsage", () => {
-    function aggregateUsage(results: SingleResult[]): UsageStats {
-        const totals: UsageStats = {
-            input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0,
-            contextTokens: 0, turns: 0,
-        };
-        for (const r of results) {
-            totals.input += r.usage.input;
-            totals.output += r.usage.output;
-            totals.cacheRead += r.usage.cacheRead;
-            totals.cacheWrite += r.usage.cacheWrite;
-            totals.cost += r.usage.cost;
-            totals.turns = (totals.turns ?? 0) + (r.usage.turns ?? 0);
-        }
-        return totals;
-    }
-
     it("aggregates usage from multiple results", () => {
         const results = [
             makeSingleResult({ usage: makeUsage({ input: 1000, output: 200, cost: 0.01, turns: 2 }) }),
@@ -268,62 +238,6 @@ describe("aggregateUsage", () => {
 // ─── formatBlockingResult (T14) ─────────────────────────────────────
 
 describe("formatBlockingResult (T14)", () => {
-    // Reimplemented for testing (matches swarm.ts logic)
-    function getFinalOutput(messages: Message[]): string {
-        for (let i = messages.length - 1; i >= 0; i--) {
-            const msg = messages[i];
-            if (msg.role === "assistant") {
-                let lastText = "";
-                for (const part of msg.content) {
-                    if (part.type === "text" && (part as any).text?.trim()) lastText = (part as any).text;
-                }
-                if (lastText) return lastText;
-            }
-        }
-        return "";
-    }
-
-    function formatBlockingResult(results: SingleResult[], mode: "single" | "parallel" | "chain"): string {
-        if (mode === "single") {
-            const r = results[0];
-            const output = getFinalOutput(r.messages);
-            if (r.exitCode !== 0) {
-                return `Agent **${r.agent}** failed (exit code ${r.exitCode}).\n` +
-                    (r.errorMessage ? `Error: ${r.errorMessage}\n` : "") +
-                    (output ? `\nLast output:\n${output}` : "");
-            }
-            return output || "(no output)";
-        }
-
-        const lines: string[] = [];
-        const succeeded = results.filter(r => r.exitCode === 0);
-
-        if (mode === "chain") {
-            lines.push(`Chain completed: ${succeeded.length}/${results.length} steps succeeded.\n`);
-            for (const r of results) {
-                const icon = r.exitCode === 0 ? "✓" : "✗";
-                const output = getFinalOutput(r.messages);
-                const preview = output.length > 200 ? output.slice(0, 200) + "..." : output;
-                lines.push(`**Step ${r.step}** (${r.agent}): ${icon}`);
-                if (preview) lines.push(preview);
-                lines.push("");
-            }
-        } else {
-            lines.push(`Parallel execution: ${succeeded.length}/${results.length} succeeded.\n`);
-            for (const r of results) {
-                const icon = r.exitCode === 0 ? "✓" : "✗";
-                const output = getFinalOutput(r.messages);
-                const preview = output.length > 200 ? output.slice(0, 200) + "..." : output;
-                lines.push(`**${r.agent}**: ${icon}`);
-                if (r.exitCode !== 0 && r.errorMessage) lines.push(`  Error: ${r.errorMessage}`);
-                if (preview) lines.push(preview);
-                lines.push("");
-            }
-        }
-
-        return lines.join("\n");
-    }
-
     it("single success shows output", () => {
         const result = makeSingleResult();
         const text = formatBlockingResult([result], "single");

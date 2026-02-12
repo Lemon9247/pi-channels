@@ -608,6 +608,9 @@ describe("DashboardOverlay", () => {
                 focusAgent: "a1",
             });
 
+            // Initial render to populate lastMaxScroll
+            overlay.render(80);
+
             // Scroll down a few times
             overlay.handleInput("\x1b[B");
             overlay.handleInput("\x1b[B");
@@ -688,8 +691,10 @@ describe("DashboardOverlay", () => {
             const overlay = createOverlay({ tui: tui as any, theme, done: done.fn });
 
             // Dispose should not throw
+            assert.doesNotThrow(() => overlay.dispose!());
 
             // Double dispose should also not throw
+            assert.doesNotThrow(() => overlay.dispose!());
         });
     });
 
@@ -768,6 +773,34 @@ describe("DashboardOverlay", () => {
             assert.ok(!text.includes("Task:"), "Should fall back to list view");
             assert.ok(text.includes("a1"), "Should show agents in list");
 
+        });
+    });
+
+    describe("openDashboardOverlay", () => {
+        it("is a no-op when ctx.hasUI is false", () => {
+            const { openDashboardOverlay } = require("../../ui/overlay.js");
+            let customCalled = false;
+            const ctx = {
+                hasUI: false,
+                ui: {
+                    custom: () => { customCalled = true; },
+                },
+            };
+            openDashboardOverlay(ctx);
+            assert.equal(customCalled, false);
+        });
+
+        it("calls ctx.ui.custom when ctx.hasUI is true", () => {
+            const { openDashboardOverlay } = require("../../ui/overlay.js");
+            let customCalled = false;
+            const ctx = {
+                hasUI: true,
+                ui: {
+                    custom: () => { customCalled = true; },
+                },
+            };
+            openDashboardOverlay(ctx);
+            assert.equal(customCalled, true);
         });
     });
 });

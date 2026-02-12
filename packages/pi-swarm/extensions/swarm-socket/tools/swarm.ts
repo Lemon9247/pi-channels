@@ -99,7 +99,7 @@ function generateSwarmId(): string {
 // ─── Blocking Mode Helpers ───────────────────────────────────────────
 
 /** Determine if this invocation should use blocking mode. */
-function shouldBlock(params: {
+export function shouldBlock(params: {
     blocking?: boolean;
     chain?: unknown[];
     agents: unknown[];
@@ -116,7 +116,7 @@ function shouldBlock(params: {
 }
 
 /** Run async functions with a concurrency limit. */
-async function mapWithConcurrencyLimit<T, R>(
+export async function mapWithConcurrencyLimit<T, R>(
     items: T[],
     limit: number,
     fn: (item: T) => Promise<R>,
@@ -140,7 +140,7 @@ async function mapWithConcurrencyLimit<T, R>(
 }
 
 /** Merge usage stats from multiple results. */
-function aggregateUsage(results: SingleResult[]): UsageStats {
+export function aggregateUsage(results: SingleResult[]): UsageStats {
     const totals: UsageStats = {
         input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0,
     };
@@ -156,7 +156,7 @@ function aggregateUsage(results: SingleResult[]): UsageStats {
 }
 
 /** Format a SingleResult into text for the tool response content. */
-function formatBlockingResult(results: SingleResult[], mode: "single" | "parallel" | "chain"): string {
+export function formatBlockingResult(results: SingleResult[], mode: "single" | "parallel" | "chain"): string {
     if (mode === "single") {
         const r = results[0];
         const output = getFinalOutput(r.messages);
@@ -212,7 +212,10 @@ async function executeBlocking(
 ): Promise<{ results: SingleResult[]; mode: "single" | "parallel" }> {
     const mode = agents.length === 1 ? "single" : "parallel";
 
-    const runOne = async (agentSpec: typeof agents[0], index: number): Promise<SingleResult> => {
+    // Accumulator for parallel streaming updates — shows all completed + current partial
+    const completedResults: SingleResult[] = [];
+
+    const runOne = async (agentSpec: typeof agents[0]): Promise<SingleResult> => {
         const def: AgentDef = {
             name: agentSpec.name,
             task: agentSpec.task,
@@ -229,16 +232,16 @@ async function executeBlocking(
             (partialResult) => {
                 // Streaming update: emit partial tool result
                 if (onUpdate) {
-                    const text = formatBlockingResult(
-                        mode === "single" ? [partialResult] : [partialResult],
-                        "single",
-                    );
+                    const allResults = mode === "single"
+                        ? [partialResult]
+                        : [...completedResults, partialResult];
+                    const text = formatBlockingResult(allResults, mode);
                     onUpdate({
                         content: [{ type: "text", text }],
                         details: {
                             mode: "blocking",
                             blockingMode: mode,
-                            results: [partialResult],
+                            results: allResults,
                         },
                     });
                 }
@@ -247,18 +250,28 @@ async function executeBlocking(
             (line) => feedRawEvent(agentSpec.name, line),  // onRawLine → activity store
         );
 
+        completedResults.push(result);
         return result;
     };
 
     let results: SingleResult[];
     if (agents.length === 1) {
-        results = [await runOne(agents[0], 0)];
+        results = [await runOne(agents[0])];
     } else {
         // Parallel blocking with concurrency limit — continue on failure
         results = await mapWithConcurrencyLimit(
             agents,
             BLOCKING_CONCURRENCY_LIMIT,
-            (agent) => runOne(agent, agents.indexOf(agent)),
+            (agent) => runOne(agent).catch((err): SingleResult => ({
+                agent: agent.agent || agent.name,
+                agentSource: "unknown",
+                task: agent.task,
+                exitCode: 1,
+                messages: [],
+                stderr: "",
+                usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
+                errorMessage: err?.message || String(err),
+            })),
         );
     }
 
@@ -273,6 +286,16 @@ async function executeChain(
     signal: AbortSignal | undefined,
     onUpdate: ((partialResult: any) => void) | undefined,
 ): Promise<{ results: SingleResult[] }> {
+    // Validate all agent names before starting
+    for (const step of chain) {
+        if (step.agent && !knownAgents.has(step.agent)) {
+            const available = [...knownAgents.keys()].join(", ");
+            throw new Error(
+                `Chain step references unknown agent "${step.agent}". Available agents: ${available || "(none)"}`,
+            );
+        }
+    }
+
     const results: SingleResult[] = [];
     let previousOutput = "";
 

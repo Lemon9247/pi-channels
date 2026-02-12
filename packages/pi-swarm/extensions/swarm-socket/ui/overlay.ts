@@ -11,9 +11,9 @@
  */
 
 import type { TUI, Component } from "@mariozechner/pi-tui";
-import { getSwarmState, type AgentInfo, type AgentStatus } from "../core/state.js";
+import { getSwarmState, type AgentInfo } from "../core/state.js";
 import { getAgentActivity, getAgentUsage, getAggregateUsage, type ActivityEvent } from "./activity.js";
-import { formatToolCall, formatTokens, formatUsageStats } from "./format.js";
+import { formatToolCall, formatTokens, formatUsageStats, statusIcon, eventIcon, formatAge } from "./format.js";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -35,38 +35,6 @@ const KEY_ENTER = "\r";
 const KEY_ESCAPE = "\x1b";
 const KEY_Q = "q";
 
-// ─── Status Icons ───────────────────────────────────────────────────
-
-function statusIcon(status: AgentStatus): string {
-    switch (status) {
-        case "starting": return "◌";
-        case "running": return "⏳";
-        case "done": return "✓";
-        case "blocked": return "⚠";
-        case "disconnected": return "✗";
-        case "crashed": return "💀";
-        default: return "?";
-    }
-}
-
-function eventIcon(type: ActivityEvent["type"]): string {
-    switch (type) {
-        case "tool_start": return "▸";
-        case "tool_end": return "▪";
-        case "message": return "💬";
-        case "thinking": return "~";
-        default: return " ";
-    }
-}
-
-function formatAge(timestamp: number): string {
-    const secs = Math.floor((Date.now() - timestamp) / 1000);
-    if (secs < 60) return `${secs}s`;
-    const mins = Math.floor(secs / 60);
-    if (mins < 60) return `${mins}m`;
-    return `${Math.floor(mins / 60)}h`;
-}
-
 // ─── Overlay Component ──────────────────────────────────────────────
 
 export class DashboardOverlay implements Component {
@@ -78,6 +46,7 @@ export class DashboardOverlay implements Component {
     private viewMode: ViewMode = "list";
     private selectedIndex = 0;
     private scrollOffset = 0;
+    private lastMaxScroll = 0;
     private detailAgent: string | null = null;
 
     // Live update timer
@@ -335,8 +304,9 @@ export class DashboardOverlay implements Component {
             theme.fg("dim", "  Esc") + theme.fg("muted", " back to list"),
         ];
 
-        // Clamp scroll offset
+        // Clamp scroll offset and track max for input handler
         const maxScroll = Math.max(0, allLines.length - 1);
+        this.lastMaxScroll = maxScroll;
         if (this.scrollOffset > maxScroll) this.scrollOffset = maxScroll;
         if (this.scrollOffset < 0) this.scrollOffset = 0;
 
@@ -404,8 +374,10 @@ export class DashboardOverlay implements Component {
                 }
                 break;
             case KEY_DOWN:
-                this.scrollOffset++;
-                this.tui.requestRender();
+                if (this.scrollOffset < this.lastMaxScroll) {
+                    this.scrollOffset++;
+                    this.tui.requestRender();
+                }
                 break;
             case KEY_ESCAPE:
                 // Back to list view
@@ -524,24 +496,35 @@ export class DashboardOverlay implements Component {
 
 // ─── Overlay Opener ─────────────────────────────────────────────────
 
+/** Structural type for the extension context needed by the overlay. */
+interface OverlayContext {
+    hasUI: boolean;
+    ui: {
+        custom<T>(
+            factory: (tui: TUI, theme: DashboardOptions["theme"], keybindings: unknown, done: (result: T) => void) => Component,
+            options: { overlay: boolean; overlayOptions: { anchor: string; width: string; maxHeight: string } },
+        ): Promise<T>;
+    };
+}
+
 /**
  * Open the dashboard overlay.
  * @param ctx Extension context with UI access
  * @param focusAgent Optional agent name to pre-focus on (for /hive <name>)
  */
-export function openDashboardOverlay(ctx: any, focusAgent?: string): void {
+export function openDashboardOverlay(ctx: OverlayContext, focusAgent?: string): void {
     if (!ctx.hasUI) return;
 
     ctx.ui.custom(
-        (tui: any, theme: any, _keybindings: any, done: (result: void) => void) => {
+        (tui: TUI, theme: DashboardOptions["theme"], _keybindings: unknown, done: (result: void) => void) => {
             return new DashboardOverlay({ tui, theme, done, focusAgent });
         },
         {
             overlay: true,
             overlayOptions: {
-                anchor: "center" as const,
-                width: "80%" as const,
-                maxHeight: "80%" as const,
+                anchor: "center",
+                width: "80%",
+                maxHeight: "80%",
             },
         },
     );

@@ -7,6 +7,42 @@
 
 import * as os from "node:os";
 import type { Message } from "@mariozechner/pi-ai";
+import type { AgentStatus } from "../core/state.js";
+
+// ─── Status Icons ────────────────────────────────────────────────────
+
+/** Canonical status icon for agent status display. */
+export function statusIcon(status: AgentStatus): string {
+    switch (status) {
+        case "starting": return "◌";
+        case "running": return "⏳";
+        case "done": return "✓";
+        case "blocked": return "⚠";
+        case "disconnected": return "✗";
+        case "crashed": return "💀";
+        default: return "?";
+    }
+}
+
+/** Icon for activity event types. */
+export function eventIcon(type: "tool_start" | "tool_end" | "message" | "thinking"): string {
+    switch (type) {
+        case "tool_start": return "▸";
+        case "tool_end": return "▪";
+        case "message": return "💬";
+        case "thinking": return "~";
+        default: return " ";
+    }
+}
+
+/** Format a timestamp as a relative age string (e.g. "3s ago", "2m ago"). */
+export function formatAge(timestamp: number): string {
+    const secs = Math.floor((Date.now() - timestamp) / 1000);
+    if (secs < 60) return `${secs}s ago`;
+    const mins = Math.floor(secs / 60);
+    if (mins < 60) return `${mins}m ago`;
+    return `${Math.floor(mins / 60)}h ago`;
+}
 
 // ─── Path Utilities ──────────────────────────────────────────────────
 

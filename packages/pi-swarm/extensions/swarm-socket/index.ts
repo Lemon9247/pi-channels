@@ -105,9 +105,9 @@ export default function (pi: ExtensionAPI) {
     // Register /swarm command (interactive dashboard overlay)
     registerSwarmCommand(pi);
 
-    // Register Ctrl+H keybind to toggle the dashboard overlay
+    // Register Ctrl+H keybind to open the dashboard overlay
     pi.registerShortcut("ctrl+h", {
-        description: "Toggle agent dashboard overlay",
+        description: "Open agent dashboard overlay",
         handler: async (ctx) => {
             openDashboardOverlay(ctx);
         },
