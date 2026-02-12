@@ -11,6 +11,7 @@
  */
 
 import type { TUI, Component } from "@mariozechner/pi-tui";
+import { matchesKey, Key } from "@mariozechner/pi-tui";
 import { getSwarmState, type AgentInfo } from "../core/state.js";
 import { getAgentActivity, getAgentUsage, getAggregateUsage, type ActivityEvent } from "./activity.js";
 import { formatToolCall, formatTokens, formatUsageStats, statusIcon, eventIcon, formatAge } from "./format.js";
@@ -26,14 +27,6 @@ interface DashboardOptions {
     /** Pre-focus on a specific agent (from /hive <name>) */
     focusAgent?: string;
 }
-
-// ─── Key Constants ──────────────────────────────────────────────────
-
-const KEY_UP = "\x1b[A";
-const KEY_DOWN = "\x1b[B";
-const KEY_ENTER = "\r";
-const KEY_ESCAPE = "\x1b";
-const KEY_Q = "q";
 
 // ─── Overlay Component ──────────────────────────────────────────────
 
@@ -334,61 +327,50 @@ export class DashboardOverlay implements Component {
     }
 
     private handleListInput(data: string): void {
-        switch (data) {
-            case KEY_UP:
-                if (this.selectedIndex > 0) {
-                    this.selectedIndex--;
+        if (matchesKey(data, Key.up)) {
+            if (this.selectedIndex > 0) {
+                this.selectedIndex--;
+                this.tui.requestRender();
+            }
+        } else if (matchesKey(data, Key.down)) {
+            if (this.selectedIndex < this.cachedAgents.length - 1) {
+                this.selectedIndex++;
+                this.tui.requestRender();
+            }
+        } else if (matchesKey(data, Key.enter)) {
+            if (this.cachedAgents.length > 0) {
+                const agent = this.cachedAgents[this.selectedIndex];
+                if (agent) {
+                    this.viewMode = "detail";
+                    this.detailAgent = agent.name;
+                    this.scrollOffset = 0;
                     this.tui.requestRender();
                 }
-                break;
-            case KEY_DOWN:
-                if (this.selectedIndex < this.cachedAgents.length - 1) {
-                    this.selectedIndex++;
-                    this.tui.requestRender();
-                }
-                break;
-            case KEY_ENTER:
-                if (this.cachedAgents.length > 0) {
-                    const agent = this.cachedAgents[this.selectedIndex];
-                    if (agent) {
-                        this.viewMode = "detail";
-                        this.detailAgent = agent.name;
-                        this.scrollOffset = 0;
-                        this.tui.requestRender();
-                    }
-                }
-                break;
-            case KEY_ESCAPE:
-            case KEY_Q:
-                this.close();
-                break;
+            }
+        } else if (matchesKey(data, Key.escape) || data === "q") {
+            this.close();
         }
     }
 
     private handleDetailInput(data: string): void {
-        switch (data) {
-            case KEY_UP:
-                if (this.scrollOffset > 0) {
-                    this.scrollOffset--;
-                    this.tui.requestRender();
-                }
-                break;
-            case KEY_DOWN:
-                if (this.scrollOffset < this.lastMaxScroll) {
-                    this.scrollOffset++;
-                    this.tui.requestRender();
-                }
-                break;
-            case KEY_ESCAPE:
-                // Back to list view
-                this.viewMode = "list";
-                this.detailAgent = null;
-                this.scrollOffset = 0;
+        if (matchesKey(data, Key.up)) {
+            if (this.scrollOffset > 0) {
+                this.scrollOffset--;
                 this.tui.requestRender();
-                break;
-            case KEY_Q:
-                this.close();
-                break;
+            }
+        } else if (matchesKey(data, Key.down)) {
+            if (this.scrollOffset < this.lastMaxScroll) {
+                this.scrollOffset++;
+                this.tui.requestRender();
+            }
+        } else if (matchesKey(data, Key.escape)) {
+            // Back to list view
+            this.viewMode = "list";
+            this.detailAgent = null;
+            this.scrollOffset = 0;
+            this.tui.requestRender();
+        } else if (data === "q") {
+            this.close();
         }
     }
 
