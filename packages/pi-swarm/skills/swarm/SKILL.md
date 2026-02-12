@@ -17,7 +17,7 @@ Use the `swarm` tool when a task benefits from **parallel agents with coordinati
 - **Review**: Multiple perspectives on a body of code
 - **Analysis**: Different aspects of the same problem examined concurrently
 
-For simple, sequential tasks, use the `subagent` tool instead.
+For simple, sequential tasks, use the `swarm` tool in blocking or chain mode instead.
 
 ## Choosing a Topology
 
@@ -189,7 +189,7 @@ Good agent scopes:
 
 Bad agent scopes:
 - Too broad — "Review the whole project" (give specific directories/files)
-- Too narrow — "Fix this one typo" (use `subagent` or do it yourself)
+- Too narrow — "Fix this one typo" (use blocking mode or do it yourself)
 - Overlapping — two agents modifying the same files (use worktrees or assign distinct files)
 
 Agent count guidelines:
