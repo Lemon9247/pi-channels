@@ -113,8 +113,7 @@ export default function (pi: ExtensionAPI) {
         },
     });
 
-    // Register management tools — only queen and coordinator get swarm/instruct/status.
-    // Agents don't get the swarm tool at all (no blocking mode, no sub-spawning).
+    // Register management tools — only queen and coordinator can spawn sub-agents.
     if (identity.role === "queen" || identity.role === "coordinator") {
         registerSwarmTool(pi);
         registerInstructTool(pi);

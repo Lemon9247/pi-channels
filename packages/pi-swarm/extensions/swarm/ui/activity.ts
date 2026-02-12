@@ -92,15 +92,6 @@ export function pushSyntheticEvent(name: string, type: ActivityEvent["type"], su
 }
 
 /**
- * Feed a raw JSON-mode stdout line into the activity store.
- *
- * Public API for activity tracking outside of trackAgentOutput.
- */
-export function feedRawEvent(agentName: string, line: string): void {
-    parseJsonEvent(agentName, line);
-}
-
-/**
  * Parse a JSON-mode stdout line from an agent process.
  * Extracts tool calls, messages, and thinking events.
  */

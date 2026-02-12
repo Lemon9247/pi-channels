@@ -41,7 +41,6 @@ import {
     trackAgentOutput, clearActivity, pushSyntheticEvent, getAgentActivity,
 } from "../ui/activity.js";
 
-
 // Agent definition for async swarm mode — requires role and swarm assignment
 const SwarmAgentSchema = Type.Object({
     name: Type.String({ description: "Unique agent name (e.g. 'agent a1')" }),
