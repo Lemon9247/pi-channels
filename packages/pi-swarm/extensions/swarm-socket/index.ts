@@ -24,6 +24,7 @@ import { GENERAL_CHANNEL, QUEEN_INBOX } from "./core/channels.js";
 import { registerMessageRenderers } from "./ui/renderers.js";
 import { clearDashboard } from "./ui/dashboard.js";
 import { registerSwarmCommand } from "./ui/commands.js";
+import { openDashboardOverlay } from "./ui/overlay.js";
 
 export default function (pi: ExtensionAPI) {
     // Initialize identity from environment variables
@@ -104,12 +105,19 @@ export default function (pi: ExtensionAPI) {
     // Register /swarm command (interactive dashboard overlay)
     registerSwarmCommand(pi);
 
+    // Register Ctrl+H keybind to open the dashboard overlay
+    pi.registerShortcut("ctrl+h", {
+        description: "Open agent dashboard overlay",
+        handler: async (ctx) => {
+            openDashboardOverlay(ctx);
+        },
+    });
+
     // Register management tools based on role:
-    // - Queen (no PI_CHANNELS_GROUP): gets swarm + instruct + status
-    // - Coordinator: gets swarm + instruct + status (can spawn sub-agents)
-    // - Agent: gets NONE of these (agents do work, they don't delegate)
+    // - Queen/Coordinator: gets swarm (full) + instruct + status
+    // - Agent: gets swarm (blocking-only mode enforced in execute())
+    registerSwarmTool(pi);
     if (identity.role === "queen" || identity.role === "coordinator") {
-        registerSwarmTool(pi);
         registerInstructTool(pi);
         registerStatusTool(pi);
     }

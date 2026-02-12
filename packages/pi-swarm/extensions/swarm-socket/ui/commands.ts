@@ -10,41 +10,13 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { getSwarmState, type AgentInfo, type AgentStatus, cleanupSwarm, gracefulShutdown } from "../core/state.js";
-import { getAgentActivity, clearActivity, type ActivityEvent } from "./activity.js";
+import { getSwarmState, type AgentInfo, cleanupSwarm, gracefulShutdown } from "../core/state.js";
+import { getAgentActivity, clearActivity } from "./activity.js";
 import { clearDashboard } from "./dashboard.js";
+import { openDashboardOverlay } from "./overlay.js";
 import { GENERAL_CHANNEL } from "../core/channels.js";
 import { getIdentity } from "../core/identity.js";
-
-function statusIcon(status: AgentStatus): string {
-    switch (status) {
-        case "starting": return "◌";
-        case "running": return "●";
-        case "done": return "✓";
-        case "blocked": return "⚠";
-        case "disconnected": return "✗";
-        case "crashed": return "✗";
-        default: return "?";
-    }
-}
-
-function eventIcon(type: ActivityEvent["type"]): string {
-    switch (type) {
-        case "tool_start": return "▸";
-        case "tool_end": return "▪";
-        case "message": return "…";
-        case "thinking": return "~";
-        default: return " ";
-    }
-}
-
-function formatAge(timestamp: number): string {
-    const secs = Math.floor((Date.now() - timestamp) / 1000);
-    if (secs < 60) return `${secs}s ago`;
-    const mins = Math.floor(secs / 60);
-    if (mins < 60) return `${mins}m ago`;
-    return `${Math.floor(mins / 60)}h ago`;
-}
+import { statusIcon, eventIcon, formatAge } from "./format.js";
 
 export function registerSwarmCommand(pi: ExtensionAPI): void {
     pi.registerCommand("hive", {
@@ -56,6 +28,34 @@ export function registerSwarmCommand(pi: ExtensionAPI): void {
                 return;
             }
 
+            // If we have UI, open the interactive overlay
+            if (ctx.hasUI) {
+                const agentName = args?.trim();
+                let focusAgent: string | undefined;
+
+                if (agentName) {
+                    // Resolve agent name (exact or partial match)
+                    const agent = state.agents.get(agentName);
+                    if (agent) {
+                        focusAgent = agent.name;
+                    } else {
+                        const match = Array.from(state.agents.values()).find(
+                            a => a.name.includes(agentName)
+                        );
+                        if (match) {
+                            focusAgent = match.name;
+                        } else {
+                            ctx.ui.notify(`Agent "${agentName}" not found.`, "warning");
+                            return;
+                        }
+                    }
+                }
+
+                openDashboardOverlay(ctx, focusAgent);
+                return;
+            }
+
+            // Fallback: text output for non-interactive contexts
             const agentName = args?.trim();
 
             if (agentName) {

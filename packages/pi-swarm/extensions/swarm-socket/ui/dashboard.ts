@@ -6,25 +6,13 @@
  * Flat list grouped by swarm — no hierarchical tree.
  */
 
-import { getSwarmState, type AgentInfo, type AgentStatus } from "../core/state.js";
+import { getSwarmState, type AgentInfo } from "../core/state.js";
 import { getAgentActivity, getAgentUsage, getAggregateUsage } from "./activity.js";
-import { formatTokens } from "./format.js";
+import { formatTokens, statusIcon } from "./format.js";
 
 // Store ctx reference for dashboard updates triggered outside tool execution
 let dashboardCtx: any = null;
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
-
-function statusIcon(status: AgentStatus): string {
-    switch (status) {
-        case "starting": return "◌";
-        case "running": return "●";
-        case "done": return "✓";
-        case "blocked": return "⚠";
-        case "disconnected": return "✗";
-        case "crashed": return "✗";
-        default: return "?";
-    }
-}
 
 /**
  * Summarize agent statuses from a list of agents.
