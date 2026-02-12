@@ -2,7 +2,7 @@
  * Display Formatting Utilities
  *
  * Pure functions for formatting tool calls, usage stats, and agent output.
- * Ported from the subagent extension for shared use.
+ * Shared formatting utilities for swarm UI.
  */
 
 import * as os from "node:os";

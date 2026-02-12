@@ -110,7 +110,7 @@ Critical path:                      5-8 sessions
 Zero npm dependencies — only peer deps on pi's core packages and Node builtins.
 
 ```bash
-cd extensions/swarm-socket
+cd extensions/swarm
 npx tsx tests/run.ts                                    # all tests
 npx tsx tests/core/routing.test.ts                      # single file
 ```

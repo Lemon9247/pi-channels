@@ -5,7 +5,7 @@
  * .pi/agents/ (project-local). Supports scope control for filtering
  * by source. Project agents override user agents of the same name.
  *
- * Ported from the subagent extension with scope-aware API.
+ * Scope-aware agent discovery API.
  */
 
 import * as fs from "node:fs";
