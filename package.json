@@ -8,7 +8,7 @@
     "scripts": {
         "build": "npm run build -w agent-channels",
         "test:channels": "npm test -w agent-channels",
-        "test:swarm": "npx tsx --test packages/pi-swarm/extensions/swarm-socket/tests/core/*.test.ts packages/pi-swarm/extensions/swarm-socket/tests/integration/*.test.ts",
+        "test:swarm": "npx tsx --test packages/pi-swarm/extensions/swarm/tests/core/*.test.ts packages/pi-swarm/extensions/swarm/tests/integration/*.test.ts",
         "test": "npm run test:channels && npm run test:swarm"
     },
     "pi": {
