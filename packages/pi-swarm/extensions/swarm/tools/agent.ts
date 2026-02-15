@@ -96,10 +96,8 @@ export function registerAgentTools(pi: ExtensionAPI): void {
 
             let sent = false;
             if (params.to) {
-                // Targeted: send to agent inbox + general so queen sees it
-                const sentInbox = sendToChannel(inboxName(params.to), msg);
-                const sentGeneral = sendToChannel(GENERAL_CHANNEL, msg);
-                sent = sentInbox || sentGeneral;
+                // Targeted: inbox only (queen monitors all inboxes)
+                sent = sendToChannel(inboxName(params.to), msg);
             } else if (topicChannel && !params.broadcast) {
                 // Team-scoped: topic channel (queen monitors it too)
                 sent = sendToChannel(topicChannel, msg);

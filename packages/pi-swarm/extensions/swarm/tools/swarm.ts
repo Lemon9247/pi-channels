@@ -271,7 +271,7 @@ function handleQueenMessage(
                 const agent = state.agents.get(senderName);
                 if (agent) {
                     if (progress.phase != null) agent.progressPhase = progress.phase;
-                    if (progress.percent != null) agent.progressPercent = progress.percent;
+                    if (progress.percent != null) agent.progressPercent = Math.max(0, Math.min(100, progress.percent));
                 }
             }
             pushSyntheticEvent(senderName, "message", content);

@@ -418,7 +418,8 @@ export class DashboardOverlay implements Component, Focusable {
 
         // Header
         const agg = getAggregateUsage();
-        let header = ` 💬 Swarm Chat — ${messages.length} message${messages.length !== 1 ? "s" : ""}`;
+        const msgLabel = messages.length >= 200 ? "200+ messages (recent)" : `${messages.length} message${messages.length !== 1 ? "s" : ""}`;
+        let header = ` 💬 Swarm Chat — ${msgLabel}`;
         if (agg.cost > 0) header += ` — $${agg.cost.toFixed(2)}`;
         contentLines.push(t.bold(t.fg("accent", header)));
         contentLines.push(t.fg("border", " " + "─".repeat(Math.max(iw - 2, 10))));
@@ -503,7 +504,7 @@ export class DashboardOverlay implements Component, Focusable {
         return lines;
     }
 
-    /** Word-wrap text to maxWidth. Simple greedy algorithm. */
+    /** Word-wrap text to maxWidth. Greedy algorithm with hard-wrap for long words. */
     private wrapText(text: string, maxWidth: number): string[] {
         const cleaned = text.replace(/\n/g, " ");
         if (visibleWidth(cleaned) <= maxWidth) return [cleaned];
@@ -512,7 +513,21 @@ export class DashboardOverlay implements Component, Focusable {
         const lines: string[] = [];
         let current = "";
 
-        for (const word of words) {
+        for (let word of words) {
+            // Hard-wrap words longer than maxWidth
+            if (visibleWidth(word) > maxWidth) {
+                if (current) {
+                    lines.push(current);
+                    current = "";
+                }
+                while (visibleWidth(word) > maxWidth) {
+                    lines.push(word.slice(0, maxWidth - 1) + "…");
+                    word = word.slice(maxWidth - 1);
+                }
+                current = word;
+                continue;
+            }
+
             const candidate = current ? `${current} ${word}` : word;
             if (visibleWidth(candidate) > maxWidth && current) {
                 lines.push(current);
@@ -755,12 +770,14 @@ export class DashboardOverlay implements Component, Focusable {
         const match = text.match(/^@(\S+)\s+(.+)$/s);
         if (match) {
             const candidate = match[1]!;
-            // Check if it's a known agent name (could be multi-word, try prefix matching)
             const knownAgent = this.findAgent(candidate);
             if (knownAgent) {
                 targetAgent = knownAgent;
                 content = match[2]!;
             }
+        } else if (text.startsWith("@")) {
+            // Bare @mention with no message — ignore silently
+            return;
         }
 
         const msg = {
@@ -774,14 +791,10 @@ export class DashboardOverlay implements Component, Focusable {
         };
 
         if (targetAgent) {
-            // Send to agent inbox + general for visibility
+            // Targeted: inbox only (queen monitors all inboxes)
             const inboxClient = state.queenClients.get(inboxName(targetAgent));
             if (inboxClient?.connected) {
                 try { inboxClient.send(msg); } catch { /* ignore */ }
-            }
-            const generalClient = state.queenClients.get(GENERAL_CHANNEL);
-            if (generalClient?.connected) {
-                try { generalClient.send(msg); } catch { /* ignore */ }
             }
         } else {
             // Broadcast to general
@@ -801,17 +814,19 @@ export class DashboardOverlay implements Component, Focusable {
         });
     }
 
-    /** Find a known agent by name or name prefix. */
+    /** Find a known agent by exact name or unique suffix. */
     private findAgent(candidate: string): string | undefined {
         const state = getSwarmState();
         if (!state) return undefined;
         // Exact match first
         if (state.agents.has(candidate)) return candidate;
-        // Prefix match (for multi-word names like "agent a1" → match on "a1")
+        // Suffix match (for multi-word names like "agent a1" → match on "a1")
+        // Only match if exactly one agent matches to avoid ambiguity
+        const matches: string[] = [];
         for (const name of state.agents.keys()) {
-            if (name.endsWith(candidate) || name.includes(candidate)) return name;
+            if (name.endsWith(candidate)) matches.push(name);
         }
-        return undefined;
+        return matches.length === 1 ? matches[0] : undefined;
     }
 
     // ─── Instruct ───────────────────────────────────────────────────

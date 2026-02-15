@@ -66,7 +66,7 @@ export default function (pi: ExtensionAPI) {
 
                 // Send registration message so queen knows we're running
                 // Send to both QUEEN_INBOX (primary) and GENERAL (fallback)
-                // — same pattern as hive_done/hive_blocker/hive_progress
+                // — same pattern as hive_done/hive_blocker
                 const registerMsg = {
                     msg: "register",
                     data: {

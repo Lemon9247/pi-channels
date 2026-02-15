@@ -74,16 +74,15 @@ The `swarm` tool spawns agents as background processes connected via **channels*
 
 Agents coordinate through two mechanisms:
 
-**Channels** (real-time notifications):
-- `hive_notify` — nudge teammates after updating the hive-mind
+**Channels** (real-time communication):
+- `message` — send content through channels (findings, coordination, progress updates)
 - `hive_blocker` — signal a blocker (interrupts the queen to help)
 - `hive_done` — signal task completion (the last thing an agent does)
-- `hive_progress` — report progress to the dashboard
 
-**Hive-mind file** (persistent shared state):
-- A shared markdown file where agents write detailed findings
-- Agents use `edit` (never `write`) on the hive-mind to avoid overwriting each other
-- Channels are the notification bell; the hive-mind is the shared memory
+**Notes file** (persistent shared state):
+- A shared markdown file for persistent artifacts (code snippets, detailed analysis)
+- Agents use `edit` (never `write`) on the notes file to avoid overwriting each other
+- Channels carry real content; the notes file is for artifacts that outlive the session
 
 ---
 

@@ -13,10 +13,9 @@ Adds multi-agent swarm support to pi. A queen instance stays interactive while b
 | `swarm` | Queen, Coordinators | Spawn agents and create channels |
 | `swarm_instruct` | Queen, Coordinators | Send message to an agent's inbox |
 | `swarm_status` | Queen, Coordinators | Check current agent status |
-| `hive_notify` | Agents, Coordinators | Post to the General channel |
+| `message` | Agents, Coordinators | Send content through channels (coordination, findings, progress) |
 | `hive_blocker` | Agents, Coordinators | Signal being stuck (interrupts queen) |
 | `hive_done` | Agents, Coordinators | Signal task completion |
-| `hive_progress` | Agents, Coordinators | Send progress/status updates |
 
 **Commands:** `/hive [name]`, `/swarm-kill`, `/swarm-stop`
 
