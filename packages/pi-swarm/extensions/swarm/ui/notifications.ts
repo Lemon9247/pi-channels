@@ -12,10 +12,9 @@
  * Delivery rules:
  * - blocker → steer (interrupts after current tool)
  * - instruct → steer (direct intervention, interrupt and adjust)
- * - nudge → followUp (waits for current tool chain to finish)
+ * - message → followUp (waits for current tool chain to finish)
  * - done → no context injection (tracked in state only)
  * - relay → no context injection (handled by swarm tool)
- * - progress → no context injection (dashboard only)
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
@@ -107,25 +106,13 @@ export function setupNotifications(pi: ExtensionAPI, clients: Map<string, Channe
                     break;
                 }
 
-                case "nudge": {
-                    const reason = (data.reason as string) || msg.msg;
-                    let text =
-                        `🔔 **Nudge from ${senderName}** (${senderRole}): ${reason}\n\n`;
-
-                    // Include payload context if available
-                    const parts: string[] = [];
-                    if (data.section) parts.push(`Section: ${data.section}`);
-                    if (data.file) parts.push(`File: \`${data.file}\``);
-                    if (data.snippet) parts.push(`> ${data.snippet}`);
-                    if (data.tags && Array.isArray(data.tags)) {
-                        parts.push(`Tags: ${(data.tags as string[]).join(", ")}`);
-                    }
-                    if (parts.length > 0) text += parts.join("\n") + "\n\n";
-
-                    text += `Check the hive-mind file — another agent found something that may affect your work.`;
+                case "message": {
+                    const content = (data.content as string) || msg.msg;
+                    const text =
+                        `💬 **${senderName}** (${senderRole}): ${content}`;
                     pi.sendMessage(
                         {
-                            customType: "swarm-nudge",
+                            customType: "swarm-message",
                             content: text,
                             display: true,
                         },
@@ -136,7 +123,6 @@ export function setupNotifications(pi: ExtensionAPI, clients: Map<string, Channe
 
                 case "done":
                 case "relay":
-                case "progress":
                     // Informational — tracked via state/dashboard, not injected into context
                     break;
             }

@@ -121,18 +121,14 @@ function parseJsonEvent(agentName: string, line: string): void {
                 summary = `edit ${shortenPath(toolArgs.path as string)}`;
             } else if (toolName === "write" && toolArgs?.path) {
                 summary = `write ${shortenPath(toolArgs.path as string)}`;
-            } else if (toolName === "hive_notify") {
-                summary = `hive_notify "${toolArgs?.reason || ""}"`;
+            } else if (toolName === "message") {
+                const content = (toolArgs?.content as string) || "";
+                const preview = content.length > 60 ? content.slice(0, 60) + "…" : content;
+                summary = toolArgs?.to ? `message → ${toolArgs.to}: "${preview}"` : `message: "${preview}"`;
             } else if (toolName === "hive_blocker") {
                 summary = `hive_blocker "${toolArgs?.description || ""}"`;
             } else if (toolName === "hive_done") {
                 summary = `hive_done "${toolArgs?.summary || ""}"`;
-            } else if (toolName === "hive_progress") {
-                const parts: string[] = [];
-                if (toolArgs?.phase) parts.push(toolArgs.phase as string);
-                if (toolArgs?.percent != null) parts.push(`${toolArgs.percent}%`);
-                if (toolArgs?.detail) parts.push(toolArgs.detail as string);
-                summary = `hive_progress ${parts.join(" — ") || ""}`;
             }
 
             pushEvent(agentName, {

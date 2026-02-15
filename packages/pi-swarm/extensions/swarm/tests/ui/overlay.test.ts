@@ -10,7 +10,7 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import * as assert from "node:assert/strict";
 import { Readable } from "node:stream";
 import { DashboardOverlay } from "../../ui/overlay.js";
-import { setSwarmState, getSwarmState, type SwarmState, type AgentInfo } from "../../core/state.js";
+import { setSwarmState, getSwarmState, pushMessage, type SwarmState, type AgentInfo } from "../../core/state.js";
 import { clearActivity, pushSyntheticEvent, trackAgentOutput } from "../../ui/activity.js";
 
 // ─── Mocks ──────────────────────────────────────────────────────────
@@ -61,6 +61,7 @@ function setupSwarm(agents: Partial<AgentInfo>[]): void {
         groupPath: "/tmp/test-group",
         agents: agentMap,
         queenClients: new Map(),
+        messages: [],
     });
 }
 
@@ -868,6 +869,215 @@ describe("DashboardOverlay", () => {
             const text = lines.join("\n");
             assert.ok(text.includes("ab"), "Should show 'ab' after deleting 'c'");
             assert.ok(!text.includes("abc"), "Should not show 'abc'");
+        });
+    });
+
+    describe("render — chat view", () => {
+        it("shows empty chat when no messages", () => {
+            setupSwarm([{ name: "a1", status: "running" }]);
+
+            const tui = mockTui();
+            const theme = mockTheme();
+            const done = mockDone();
+
+            const overlay = createOverlay({ tui: tui as any, theme, done: done.fn });
+            // Switch to chat view
+            overlay.handleInput("c");
+            const lines = overlay.render(80);
+            const text = lines.join("\n");
+
+            assert.ok(text.includes("Swarm Chat"), "Should show chat header");
+            assert.ok(text.includes("no messages yet"), "Should show empty state");
+        });
+
+        it("shows messages with sender and content", () => {
+            setupSwarm([{ name: "a1", status: "running" }]);
+
+            const state = getSwarmState()!;
+            state.messages.push(
+                { from: "a1", content: "Found the bug", timestamp: Date.now(), channel: "general" },
+                { from: "a2", content: "Nice, I'll fix it", timestamp: Date.now(), channel: "general" },
+            );
+
+            const tui = mockTui();
+            const theme = mockTheme();
+            const done = mockDone();
+
+            const overlay = createOverlay({ tui: tui as any, theme, done: done.fn });
+            overlay.handleInput("c");
+            const lines = overlay.render(80);
+            const text = lines.join("\n");
+
+            assert.ok(text.includes("a1"), "Should show first sender");
+            assert.ok(text.includes("Found the bug"), "Should show first message");
+            assert.ok(text.includes("a2"), "Should show second sender");
+            assert.ok(text.includes("I'll fix it"), "Should show second message");
+        });
+
+        it("shows targeted messages with arrow indicator", () => {
+            setupSwarm([
+                { name: "a1", status: "running" },
+                { name: "a2", status: "running" },
+            ]);
+
+            const state = getSwarmState()!;
+            state.messages.push(
+                { from: "a1", content: "Check your types", timestamp: Date.now(), to: "a2", channel: "inbox-a2" },
+            );
+
+            const tui = mockTui();
+            const theme = mockTheme();
+            const done = mockDone();
+
+            const overlay = createOverlay({ tui: tui as any, theme, done: done.fn });
+            overlay.handleInput("c");
+            const lines = overlay.render(80);
+            const text = lines.join("\n");
+
+            assert.ok(text.includes("→ a2"), "Should show target indicator");
+            assert.ok(text.includes("Check your types"), "Should show message content");
+        });
+
+        it("shows input bar with chat prompt", () => {
+            setupSwarm([{ name: "a1", status: "running" }]);
+
+            const tui = mockTui();
+            const theme = mockTheme();
+            const done = mockDone();
+
+            const overlay = createOverlay({ tui: tui as any, theme, done: done.fn });
+            overlay.handleInput("c");
+            const lines = overlay.render(80);
+            const text = lines.join("\n");
+
+            assert.ok(text.includes("💬"), "Should show chat input prompt");
+        });
+
+        it("shows message count in header", () => {
+            setupSwarm([{ name: "a1", status: "running" }]);
+
+            const state = getSwarmState()!;
+            state.messages.push(
+                { from: "a1", content: "msg 1", timestamp: Date.now() },
+                { from: "a2", content: "msg 2", timestamp: Date.now() },
+                { from: "a1", content: "msg 3", timestamp: Date.now() },
+            );
+
+            const tui = mockTui();
+            const theme = mockTheme();
+            const done = mockDone();
+
+            const overlay = createOverlay({ tui: tui as any, theme, done: done.fn });
+            overlay.handleInput("c");
+            const lines = overlay.render(80);
+            const text = lines.join("\n");
+
+            assert.ok(text.includes("3 messages"), "Should show message count");
+        });
+    });
+
+    describe("keyboard handling — chat view", () => {
+        it("'c' in list view switches to chat", () => {
+            setupSwarm([{ name: "a1", status: "running" }]);
+
+            const tui = mockTui();
+            const theme = mockTheme();
+            const done = mockDone();
+
+            const overlay = createOverlay({ tui: tui as any, theme, done: done.fn });
+            overlay.handleInput("c");
+            const lines = overlay.render(80);
+            const text = lines.join("\n");
+
+            assert.ok(text.includes("Swarm Chat"), "Should switch to chat view");
+        });
+
+        it("Tab in chat view goes back to list", () => {
+            setupSwarm([{ name: "a1", status: "running" }]);
+
+            const tui = mockTui();
+            const theme = mockTheme();
+            const done = mockDone();
+
+            const overlay = createOverlay({ tui: tui as any, theme, done: done.fn });
+            overlay.handleInput("c"); // go to chat
+            overlay.handleInput("\t"); // tab back to list
+            const lines = overlay.render(80);
+            const text = lines.join("\n");
+
+            assert.ok(text.includes("Agent Dashboard"), "Should be back in list view");
+        });
+
+        it("typing in chat view captures input", () => {
+            setupSwarm([{ name: "a1", status: "running" }]);
+
+            const tui = mockTui();
+            const theme = mockTheme();
+            const done = mockDone();
+
+            const overlay = createOverlay({ tui: tui as any, theme, done: done.fn });
+            overlay.handleInput("c");
+            overlay.handleInput("h");
+            overlay.handleInput("e");
+            overlay.handleInput("l");
+            overlay.handleInput("l");
+            overlay.handleInput("o");
+
+            const lines = overlay.render(80);
+            const text = lines.join("\n");
+            assert.ok(text.includes("hello"), "Should show typed text in input bar");
+        });
+
+        it("'c' in detail view switches to chat", () => {
+            setupSwarm([{ name: "a1", status: "running" }]);
+
+            const tui = mockTui();
+            const theme = mockTheme();
+            const done = mockDone();
+
+            const overlay = createOverlay({
+                tui: tui as any, theme, done: done.fn,
+                focusAgent: "a1",
+            });
+
+            overlay.handleInput("c"); // go to chat from detail
+            const lines = overlay.render(80);
+            const text = lines.join("\n");
+
+            assert.ok(text.includes("Swarm Chat"), "Should switch to chat view from detail");
+        });
+
+        it("Escape with empty input closes overlay", () => {
+            setupSwarm([{ name: "a1", status: "running" }]);
+
+            const tui = mockTui();
+            const theme = mockTheme();
+            const done = mockDone();
+
+            const overlay = createOverlay({ tui: tui as any, theme, done: done.fn });
+            overlay.handleInput("c");
+            overlay.handleInput("\x1b"); // escape with empty input
+
+            assert.ok(done.called, "Should close overlay");
+        });
+
+        it("Escape with text clears input instead of closing", () => {
+            setupSwarm([{ name: "a1", status: "running" }]);
+
+            const tui = mockTui();
+            const theme = mockTheme();
+            const done = mockDone();
+
+            const overlay = createOverlay({ tui: tui as any, theme, done: done.fn });
+            overlay.handleInput("c");
+            overlay.handleInput("x"); // type something
+            overlay.handleInput("\x1b"); // escape should clear input
+
+            assert.ok(!done.called, "Should NOT close overlay when clearing input");
+
+            const lines = overlay.render(80);
+            const text = lines.join("\n");
+            assert.ok(text.includes("Swarm Chat"), "Should still be in chat view");
         });
     });
 

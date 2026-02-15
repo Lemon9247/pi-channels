@@ -10,7 +10,7 @@ The queen may send you instructions at any time. Instructions arrive on your inb
 
 ## Communicating with the Queen
 
-Your chat messages do NOT reach the queen. If the queen sends you an instruction asking for information, you **must** respond using `hive_notify`. That's the only way your reply reaches the queen.
+Your chat messages do NOT reach the queen. If the queen sends you an instruction asking for information, you **must** respond using `message`. That's the only way your reply reaches the queen.
 
 ## Relaying Instructions
 
@@ -22,6 +22,6 @@ When your sub-agents register, complete, or signal blockers, those events are au
 
 ## Cross-Team Coordination
 
-Use the general channel for announcements that affect other teams. Use `hive_notify` with `broadcast: true` to ensure cross-team visibility. For team-internal coordination, use your topic channel (the default for `hive_notify`).
+Use the general channel for announcements that affect other teams. Use `message` with `broadcast: true` to ensure cross-team visibility. For team-internal coordination, use your topic channel (the default for `message`).
 
 {{coordinatorFiles}}

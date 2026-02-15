@@ -25,12 +25,24 @@ export interface AgentInfo {
     progressDetail?: string;
 }
 
+export interface MessageEntry {
+    from: string;
+    content: string;
+    timestamp: number;
+    to?: string;
+    channel?: string;
+}
+
+/** Max messages retained in state for the overlay chat view. */
+const MAX_MESSAGES = 200;
+
 export interface SwarmState {
     generation: number;
     group: ChannelGroup | null;
     groupPath: string;
     agents: Map<string, AgentInfo>;
     taskDirPath?: string;
+    messages: MessageEntry[];
 
     /** Queen's connected ChannelClients for monitoring all channels. */
     queenClients: Map<string, ChannelClient>;
@@ -39,7 +51,19 @@ export interface SwarmState {
     onAgentDone?: (agentName: string, summary: string) => void;
     onAllDone?: () => void;
     onBlocker?: (agentName: string, description: string) => void;
-    onNudge?: (reason: string, from: string) => void;
+    onMessage?: (content: string, from: string) => void;
+}
+
+/**
+ * Append a message to the swarm's message history.
+ * Caps at MAX_MESSAGES to prevent unbounded growth.
+ */
+export function pushMessage(entry: MessageEntry): void {
+    if (!activeSwarm) return;
+    activeSwarm.messages.push(entry);
+    if (activeSwarm.messages.length > MAX_MESSAGES) {
+        activeSwarm.messages.splice(0, activeSwarm.messages.length - MAX_MESSAGES);
+    }
 }
 
 // ─── State Machine ──────────────────────────────────────────────────

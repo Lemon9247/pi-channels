@@ -2,10 +2,12 @@
  * Interactive Dashboard Overlay
  *
  * Modal overlay for swarm observation and interaction.
- * Two view modes:
+ * Three view modes:
  *   - List: all agents with status, usage, current activity. Arrow key navigation.
  *   - Detail: single agent with raw output stream (thinking, messages, tool calls
  *     with full results). Scrollable. Press 'i' to send instructions.
+ *   - Chat: chronological message stream across all agents. Always-visible input bar.
+ *     Type to send messages to general channel. Use @agent-name to target specific agents.
  *
  * Reads from the same stores as the passive widget (activity.ts, state.ts).
  * Live-updates via a refresh timer while open.
@@ -13,7 +15,7 @@
 
 import type { TUI, Component, Focusable } from "@mariozechner/pi-tui";
 import { matchesKey, Key, visibleWidth, truncateToWidth, CURSOR_MARKER } from "@mariozechner/pi-tui";
-import { getSwarmState, type AgentInfo } from "../core/state.js";
+import { getSwarmState, pushMessage, type AgentInfo, type MessageEntry } from "../core/state.js";
 import { getAgentActivity, getAgentUsage, getAggregateUsage, type ActivityEvent } from "./activity.js";
 import { formatTokens, formatUsageStats, statusIcon, formatAge } from "./format.js";
 import { getIdentity } from "../core/identity.js";
@@ -31,7 +33,7 @@ export function isDashboardOpen(): boolean {
 // ─── Types ──────────────────────────────────────────────────────────
 
 type AgentStatus = "running" | "starting" | "done" | "blocked" | "crashed" | "disconnected";
-type ViewMode = "list" | "detail";
+type ViewMode = "list" | "detail" | "chat";
 
 interface Theme {
     fg: (color: string, text: string) => string;
@@ -122,6 +124,8 @@ export class DashboardOverlay implements Component, Focusable {
                 return this.renderList(w);
             case "detail":
                 return this.renderDetail(w);
+            case "chat":
+                return this.renderChat(w);
         }
     }
 
@@ -168,6 +172,7 @@ export class DashboardOverlay implements Component, Focusable {
         lines.push(this.row(
             "  " + t.fg("dim", "↑↓") + t.fg("muted", " navigate  ") +
             t.fg("dim", "⏎") + t.fg("muted", " detail  ") +
+            t.fg("dim", "c") + t.fg("muted", " chat  ") +
             t.fg("dim", "Esc/q") + t.fg("muted", " close"),
             width,
         ));
@@ -367,6 +372,7 @@ export class DashboardOverlay implements Component, Focusable {
         let hints = "  " + t.fg("dim", "↑↓") + t.fg("muted", " scroll  ");
         if (!this.inputActive) {
             hints += t.fg("dim", "i") + t.fg("muted", " instruct  ");
+            hints += t.fg("dim", "c") + t.fg("muted", " chat  ");
         }
         hints += t.fg("dim", "Esc") + t.fg("muted", " back  ");
         hints += t.fg("dim", "q") + t.fg("muted", " close");
@@ -400,20 +406,156 @@ export class DashboardOverlay implements Component, Focusable {
         return lines;
     }
 
+    // ─── Chat View ─────────────────────────────────────────────────
+
+    private renderChat(width: number): string[] {
+        const t = this.theme;
+        const iw = width - 2;
+        const state = getSwarmState();
+        const messages = state?.messages ?? [];
+
+        const contentLines: string[] = [];
+
+        // Header
+        const agg = getAggregateUsage();
+        const msgLabel = messages.length >= 200 ? "200+ messages (recent)" : `${messages.length} message${messages.length !== 1 ? "s" : ""}`;
+        let header = ` 💬 Swarm Chat — ${msgLabel}`;
+        if (agg.cost > 0) header += ` — $${agg.cost.toFixed(2)}`;
+        contentLines.push(t.bold(t.fg("accent", header)));
+        contentLines.push(t.fg("border", " " + "─".repeat(Math.max(iw - 2, 10))));
+
+        if (messages.length === 0) {
+            contentLines.push(t.fg("dim", "  (no messages yet)"));
+        } else {
+            for (const msg of messages) {
+                const age = formatAge(msg.timestamp).padStart(4);
+                const ageStr = t.fg("dim", age);
+                const sender = t.bold(t.fg("accent", msg.from));
+                const target = msg.to ? t.fg("dim", ` → ${msg.to}`) : "";
+
+                // Wrap long messages across multiple lines
+                const maxContentWidth = Math.max(width - 20, 30);
+                const lines = this.wrapText(msg.content, maxContentWidth);
+                contentLines.push(`  ${ageStr} ${sender}${target}: ${lines[0] || ""}`);
+                for (let i = 1; i < lines.length; i++) {
+                    contentLines.push(`        ${lines[i]}`);
+                }
+            }
+        }
+
+        // Store content height for scroll clamping
+        this.lastContentHeight = contentLines.length;
+
+        const lines: string[] = [];
+        lines.push(t.fg("border", `╭${"─".repeat(iw)}╮`));
+
+        const maxVisible = 30;
+        const visibleHeight = Math.min(contentLines.length, maxVisible);
+        const maxScroll = Math.max(0, contentLines.length - visibleHeight);
+        if (this.autoScroll) {
+            this.scrollOffset = maxScroll;
+        }
+        if (this.scrollOffset > maxScroll) this.scrollOffset = maxScroll;
+        if (this.scrollOffset < 0) this.scrollOffset = 0;
+
+        if (this.scrollOffset > 0) {
+            lines.push(this.row(t.fg("dim", `  ↑ ${this.scrollOffset} more above`), width));
+        }
+
+        const visible = contentLines.slice(this.scrollOffset, this.scrollOffset + visibleHeight);
+        for (const line of visible) {
+            lines.push(this.row(line, width));
+        }
+
+        if (this.scrollOffset < maxScroll) {
+            const below = maxScroll - this.scrollOffset;
+            lines.push(this.row(t.fg("dim", `  ↓ ${below} more below`), width));
+        }
+
+        // Footer + input bar
+        lines.push(this.row(t.fg("border", " " + "─".repeat(Math.max(iw - 2, 10))), width));
+
+        let hints = "  " + t.fg("dim", "↑↓") + t.fg("muted", " scroll  ");
+        hints += t.fg("dim", "Tab") + t.fg("muted", " list  ");
+        hints += t.fg("dim", "Esc/q") + t.fg("muted", " close  ");
+        hints += t.fg("dim", "@name") + t.fg("muted", " target");
+        lines.push(this.row(hints, width));
+
+        // Always-visible input bar
+        lines.push(this.row(t.fg("border", " " + "─".repeat(Math.max(iw - 2, 10))), width));
+        const promptStr = " 💬 ";
+        const prompt = t.fg("accent", promptStr);
+        const maxInputWidth = Math.max(iw - visibleWidth(promptStr) - 2, 10);
+        let visibleStart = 0;
+        if (this.inputCursor > maxInputWidth - 5) {
+            visibleStart = this.inputCursor - maxInputWidth + 5;
+        }
+        const visibleText = this.inputText.slice(visibleStart, visibleStart + maxInputWidth);
+        const cursorInWindow = this.inputCursor - visibleStart;
+        const beforeCursor = visibleText.slice(0, cursorInWindow);
+        const cursorChar = cursorInWindow < visibleText.length ? visibleText[cursorInWindow]! : " ";
+        const afterCursor = visibleText.slice(cursorInWindow + 1);
+        const scrollIndicator = visibleStart > 0 ? t.fg("dim", "…") : "";
+        const marker = this.focused ? CURSOR_MARKER : "";
+        const inputLine = prompt + scrollIndicator + beforeCursor + marker + `\x1b[7m${cursorChar}\x1b[27m` + afterCursor;
+        lines.push(this.row(inputLine, width));
+
+        lines.push(t.fg("border", `╰${"─".repeat(iw)}╯`));
+        return lines;
+    }
+
+    /** Word-wrap text to maxWidth. Greedy algorithm with hard-wrap for long words. */
+    private wrapText(text: string, maxWidth: number): string[] {
+        const cleaned = text.replace(/\n/g, " ");
+        if (visibleWidth(cleaned) <= maxWidth) return [cleaned];
+
+        const words = cleaned.split(" ");
+        const lines: string[] = [];
+        let current = "";
+
+        for (let word of words) {
+            // Hard-wrap words longer than maxWidth
+            if (visibleWidth(word) > maxWidth) {
+                if (current) {
+                    lines.push(current);
+                    current = "";
+                }
+                while (visibleWidth(word) > maxWidth) {
+                    lines.push(word.slice(0, maxWidth - 1) + "…");
+                    word = word.slice(maxWidth - 1);
+                }
+                current = word;
+                continue;
+            }
+
+            const candidate = current ? `${current} ${word}` : word;
+            if (visibleWidth(candidate) > maxWidth && current) {
+                lines.push(current);
+                current = word;
+            } else {
+                current = candidate;
+            }
+        }
+        if (current) lines.push(current);
+        return lines.length > 0 ? lines : [""];
+    }
+
     // ─── Input Handling ─────────────────────────────────────────────
 
     handleInput(data: string): void {
-        if (this.inputActive) {
-            this.handleInputMode(data);
-            return;
-        }
-
         switch (this.viewMode) {
             case "list":
                 this.handleListInput(data);
                 break;
             case "detail":
-                this.handleDetailInput(data);
+                if (this.inputActive) {
+                    this.handleInputMode(data);
+                } else {
+                    this.handleDetailInput(data);
+                }
+                break;
+            case "chat":
+                this.handleChatInput(data);
                 break;
         }
     }
@@ -440,6 +582,13 @@ export class DashboardOverlay implements Component, Focusable {
                     this.tui.requestRender();
                 }
             }
+        } else if (data === "c") {
+            this.viewMode = "chat";
+            this.scrollOffset = 0;
+            this.autoScroll = true;
+            this.inputText = "";
+            this.inputCursor = 0;
+            this.tui.requestRender();
         } else if (matchesKey(data, Key.escape) || data === "q") {
             this.close();
         }
@@ -465,6 +614,13 @@ export class DashboardOverlay implements Component, Focusable {
         } else if (data === "i") {
             // Activate instruct input
             this.inputActive = true;
+            this.inputText = "";
+            this.inputCursor = 0;
+            this.tui.requestRender();
+        } else if (data === "c") {
+            this.viewMode = "chat";
+            this.scrollOffset = 0;
+            this.autoScroll = true;
             this.inputText = "";
             this.inputCursor = 0;
             this.tui.requestRender();
@@ -524,6 +680,153 @@ export class DashboardOverlay implements Component, Focusable {
             this.inputCursor++;
             this.tui.requestRender();
         }
+    }
+
+    private handleChatInput(data: string): void {
+        if (matchesKey(data, Key.up)) {
+            this.autoScroll = false;
+            if (this.scrollOffset > 0) {
+                this.scrollOffset--;
+                this.tui.requestRender();
+            }
+        } else if (matchesKey(data, Key.down)) {
+            const maxScroll = Math.max(0, this.lastContentHeight - 30);
+            if (this.scrollOffset < maxScroll) {
+                this.scrollOffset++;
+                this.tui.requestRender();
+            }
+            if (this.scrollOffset >= maxScroll) {
+                this.autoScroll = true;
+            }
+        } else if (matchesKey(data, Key.enter)) {
+            const text = this.inputText.trim();
+            if (text) {
+                this.sendChatMessage(text);
+                this.inputText = "";
+                this.inputCursor = 0;
+                this.autoScroll = true;
+                this.tui.requestRender();
+            }
+        } else if (data === "\t") {
+            // Tab → back to list
+            this.viewMode = "list";
+            this.scrollOffset = 0;
+            this.autoScroll = true;
+            this.tui.requestRender();
+        } else if (matchesKey(data, Key.escape) || (data === "q" && !this.inputText)) {
+            if (this.inputText) {
+                // Clear input first
+                this.inputText = "";
+                this.inputCursor = 0;
+                this.tui.requestRender();
+            } else {
+                this.close();
+            }
+        } else if (matchesKey(data, Key.backspace)) {
+            if (this.inputCursor > 0) {
+                this.inputText = this.inputText.slice(0, this.inputCursor - 1) + this.inputText.slice(this.inputCursor);
+                this.inputCursor--;
+                this.tui.requestRender();
+            }
+        } else if (matchesKey(data, Key.left)) {
+            if (this.inputCursor > 0) {
+                this.inputCursor--;
+                this.tui.requestRender();
+            }
+        } else if (matchesKey(data, Key.right)) {
+            if (this.inputCursor < this.inputText.length) {
+                this.inputCursor++;
+                this.tui.requestRender();
+            }
+        } else if (matchesKey(data, Key.home)) {
+            this.inputCursor = 0;
+            this.tui.requestRender();
+        } else if (matchesKey(data, Key.end)) {
+            this.inputCursor = this.inputText.length;
+            this.tui.requestRender();
+        } else if (data.length === 1 && data.charCodeAt(0) >= 32) {
+            this.inputText = this.inputText.slice(0, this.inputCursor) + data + this.inputText.slice(this.inputCursor);
+            this.inputCursor++;
+            this.tui.requestRender();
+        }
+    }
+
+    // ─── Message Sending ────────────────────────────────────────────
+
+    /**
+     * Send a chat message from the overlay.
+     * Parse @agent-name prefix for targeted messages.
+     * Messages go through channels as the queen identity.
+     */
+    private sendChatMessage(text: string): void {
+        const state = getSwarmState();
+        if (!state) return;
+
+        const identity = getIdentity();
+        let targetAgent: string | undefined;
+        let content = text;
+
+        // Parse @agent-name targeting
+        const match = text.match(/^@(\S+)\s+(.+)$/s);
+        if (match) {
+            const candidate = match[1]!;
+            const knownAgent = this.findAgent(candidate);
+            if (knownAgent) {
+                targetAgent = knownAgent;
+                content = match[2]!;
+            }
+        } else if (text.startsWith("@")) {
+            // Bare @mention with no message — ignore silently
+            return;
+        }
+
+        const msg = {
+            msg: content,
+            data: {
+                type: "message" as const,
+                from: identity.name || "queen",
+                content,
+                to: targetAgent,
+            },
+        };
+
+        if (targetAgent) {
+            // Targeted: inbox only (queen monitors all inboxes)
+            const inboxClient = state.queenClients.get(inboxName(targetAgent));
+            if (inboxClient?.connected) {
+                try { inboxClient.send(msg); } catch { /* ignore */ }
+            }
+        } else {
+            // Broadcast to general
+            const generalClient = state.queenClients.get(GENERAL_CHANNEL);
+            if (generalClient?.connected) {
+                try { generalClient.send(msg); } catch { /* ignore */ }
+            }
+        }
+
+        // Also store locally in message history so it appears in chat immediately
+        pushMessage({
+            from: identity.name || "queen",
+            content,
+            timestamp: Date.now(),
+            to: targetAgent,
+            channel: targetAgent ? inboxName(targetAgent) : GENERAL_CHANNEL,
+        });
+    }
+
+    /** Find a known agent by exact name or unique suffix. */
+    private findAgent(candidate: string): string | undefined {
+        const state = getSwarmState();
+        if (!state) return undefined;
+        // Exact match first
+        if (state.agents.has(candidate)) return candidate;
+        // Suffix match (for multi-word names like "agent a1" → match on "a1")
+        // Only match if exactly one agent matches to avoid ambiguity
+        const matches: string[] = [];
+        for (const name of state.agents.keys()) {
+            if (name.endsWith(candidate)) matches.push(name);
+        }
+        return matches.length === 1 ? matches[0] : undefined;
     }
 
     // ─── Instruct ───────────────────────────────────────────────────
@@ -636,19 +939,15 @@ export class DashboardOverlay implements Component, Focusable {
                 return `edit ${(args.path as string) || ""}`;
             case "write":
                 return `write ${(args.path as string) || ""}`;
-            case "hive_notify":
-                return `hive_notify "${(args.reason as string) || ""}"`;
+            case "message": {
+                const content = (args.content as string) || "";
+                const preview = content.length > 60 ? content.slice(0, 60) + "…" : content;
+                return args.to ? `message → ${args.to}: "${preview}"` : `message: "${preview}"`;
+            }
             case "hive_blocker":
                 return `hive_blocker "${(args.description as string) || ""}"`;
             case "hive_done":
                 return `hive_done "${(args.summary as string) || ""}"`;
-            case "hive_progress": {
-                const parts: string[] = [];
-                if (args.phase) parts.push(args.phase as string);
-                if (args.percent != null) parts.push(`${args.percent}%`);
-                if (args.detail) parts.push(args.detail as string);
-                return `hive_progress ${parts.join(" — ")}`;
-            }
             default:
                 return name;
         }

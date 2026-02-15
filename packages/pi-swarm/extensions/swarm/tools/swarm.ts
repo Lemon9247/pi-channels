@@ -30,6 +30,7 @@ import {
     updateAgentStatus,
     cleanupSwarm,
     getParentClients,
+    pushMessage,
 } from "../core/state.js";
 import { getIdentity } from "../core/identity.js";
 import { scaffoldTaskDir, scaffoldCoordinatorSubDir, type ScaffoldResult } from "../core/scaffold.js";
@@ -180,8 +181,8 @@ function handleRelayEvent(
             updateAgentStatus(name, "disconnected");
         }
         pushSyntheticEvent(name, "message", "disconnected");
-    } else if (event === "nudge") {
-        pushSyntheticEvent(name, "message", `hive-mind: ${relay.reason || ""}`);
+    } else if (event === "message") {
+        pushSyntheticEvent(name, "message", `${relay.content || ""}`);
     }
 
     updateDashboard(ctx);
@@ -220,7 +221,7 @@ function handleQueenMessage(
     // Dedup: messages sent to both QUEEN_INBOX and GENERAL (defense-in-depth)
     // are only processed from QUEEN_INBOX. General is the fallback channel —
     // if the queen got it on QUEEN_INBOX, ignore the duplicate on general.
-    const primaryOnQueenInbox = ["done", "blocker", "progress", "register"];
+    const primaryOnQueenInbox = ["done", "blocker", "register"];
     if (primaryOnQueenInbox.includes(type) && fromChannel === GENERAL_CHANNEL) {
         return;
     }
@@ -254,24 +255,29 @@ function handleQueenMessage(
             break;
         }
 
-        case "nudge": {
-            const reason = (msg.data.reason as string) || msg.msg;
-            state.onNudge?.(reason, senderName);
-            relayToParent("nudge", senderName, agentMap.get(senderName), { reason });
-            break;
-        }
-
-        case "progress": {
-            const agent = state.agents.get(senderName);
-            if (agent) {
-                if (msg.data.phase != null) agent.progressPhase = msg.data.phase as string;
-                if (msg.data.percent != null) agent.progressPercent = msg.data.percent as number;
-                if (msg.data.detail != null) agent.progressDetail = msg.data.detail as string;
+        case "message": {
+            const content = (msg.data.content as string) || msg.msg;
+            // Store in message history for chat view
+            pushMessage({
+                from: senderName,
+                content,
+                timestamp: Date.now(),
+                to: msg.data.to as string | undefined,
+                channel: fromChannel,
+            });
+            // Update progress on agent if present
+            const progress = msg.data.progress as { phase?: string; percent?: number } | undefined;
+            if (progress) {
+                const agent = state.agents.get(senderName);
+                if (agent) {
+                    if (progress.phase != null) agent.progressPhase = progress.phase;
+                    if (progress.percent != null) agent.progressPercent = Math.max(0, Math.min(100, progress.percent));
+                }
             }
-            const detail = (msg.data.detail as string) || (msg.data.phase as string) || "progress";
-            const pct = msg.data.percent != null ? ` (${msg.data.percent}%)` : "";
-            pushSyntheticEvent(senderName, "message", `${detail}${pct}`);
+            pushSyntheticEvent(senderName, "message", content);
+            state.onMessage?.(content, senderName);
             updateDashboard(ctx);
+            relayToParent("message", senderName, agentMap.get(senderName), { content });
             break;
         }
 
@@ -464,6 +470,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                 agents: agentMap,
                 taskDirPath,
                 queenClients,
+                messages: [],
             };
 
             // Wire up notifications to pi.sendMessage
@@ -506,12 +513,13 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                 updateDashboard(ctx);
             };
 
-            state.onNudge = (reason, from) => {
+            state.onMessage = (content, from) => {
                 if (getSwarmGeneration() !== gen) return;
+                const preview = content.length > 120 ? content.slice(0, 120) + "…" : content;
                 bufferedSendMessage(pi,
                     {
-                        customType: "swarm-nudge",
-                        content: `🔔 **${from}** updated the hive-mind: ${reason}`,
+                        customType: "swarm-message",
+                        content: `💬 **${from}**: ${preview}`,
                         display: true,
                     },
                     { deliverAs: "followUp" },
