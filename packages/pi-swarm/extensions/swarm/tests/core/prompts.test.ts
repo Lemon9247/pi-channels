@@ -29,7 +29,7 @@ describe("prompt loader", () => {
     it("loads all tool files", () => {
         const store = loadPrompts(PROMPTS_DIR);
         const expected = [
-            "hive-notify", "hive-done", "hive-blocker", "hive-progress",
+            "message", "hive-done", "hive-blocker",
             "swarm-instruct", "swarm-status",
         ];
         for (const name of expected) {
@@ -135,7 +135,7 @@ describe("prompt builder", () => {
 
         // Still has agent base
         assert.ok(prompt.includes("coord-alpha"), "should contain agent name");
-        assert.ok(prompt.includes("hive_notify"), "should include agent tool docs");
+        assert.ok(prompt.includes("message"), "should include agent tool docs");
     });
 
     it("includes file paths when agentFiles provided", () => {
@@ -187,10 +187,9 @@ describe("prompt builder", () => {
             swarmAgents: ["agent a1"],
         });
 
-        assert.ok(prompt.includes("hive_notify"), "should include hive_notify doc");
+        assert.ok(prompt.includes("## message"), "should include message tool doc");
         assert.ok(prompt.includes("hive_done"), "should include hive_done doc");
         assert.ok(prompt.includes("hive_blocker"), "should include hive_blocker doc");
-        assert.ok(prompt.includes("hive_progress"), "should include hive_progress doc");
     });
 
     it("includes all pattern docs", () => {
@@ -202,8 +201,8 @@ describe("prompt builder", () => {
 
         // Check for content from each pattern file
         assert.ok(prompt.includes("fan messages out"), "should include channels pattern");
-        assert.ok(prompt.includes("Claim your area"), "should include coordination pattern");
-        assert.ok(prompt.includes("NEVER use the `write` tool on the hive-mind"), "should include hive-mind pattern");
+        assert.ok(prompt.includes("Message early"), "should include coordination pattern");
+        assert.ok(prompt.includes("NEVER use the `write` tool on the notes file"), "should include notes file pattern");
         assert.ok(prompt.includes("Inbox Patterns"), "should include inbox patterns");
     });
 

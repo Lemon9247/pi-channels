@@ -636,19 +636,15 @@ export class DashboardOverlay implements Component, Focusable {
                 return `edit ${(args.path as string) || ""}`;
             case "write":
                 return `write ${(args.path as string) || ""}`;
-            case "hive_notify":
-                return `hive_notify "${(args.reason as string) || ""}"`;
+            case "message": {
+                const content = (args.content as string) || "";
+                const preview = content.length > 60 ? content.slice(0, 60) + "…" : content;
+                return args.to ? `message → ${args.to}: "${preview}"` : `message: "${preview}"`;
+            }
             case "hive_blocker":
                 return `hive_blocker "${(args.description as string) || ""}"`;
             case "hive_done":
                 return `hive_done "${(args.summary as string) || ""}"`;
-            case "hive_progress": {
-                const parts: string[] = [];
-                if (args.phase) parts.push(args.phase as string);
-                if (args.percent != null) parts.push(`${args.percent}%`);
-                if (args.detail) parts.push(args.detail as string);
-                return `hive_progress ${parts.join(" — ")}`;
-            }
             default:
                 return name;
         }

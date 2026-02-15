@@ -51,7 +51,7 @@ describe("shouldProcessMessage", () => {
 
         it("accepts messages with no sender (legacy)", () => {
             assert.equal(
-                shouldProcessMessage(msg({ type: "nudge" }), "a1", "s1"),
+                shouldProcessMessage(msg({ type: "message" }), "a1", "s1"),
                 true,
             );
         });
@@ -141,7 +141,7 @@ describe("shouldProcessMessage", () => {
         it("accepts messages with no to field (broadcasts)", () => {
             assert.equal(
                 shouldProcessMessage(
-                    msg({ type: "nudge", from: "a2" }),
+                    msg({ type: "message", from: "a2" }),
                     "a1",
                     "s1",
                 ),
@@ -176,7 +176,7 @@ describe("shouldProcessMessage", () => {
         it("accepts non-instruct types from other agents regardless of swarm", () => {
             assert.equal(
                 shouldProcessMessage(
-                    msg({ type: "nudge", from: "a2", swarm: "other" }),
+                    msg({ type: "message", from: "a2", swarm: "other" }),
                     "a1",
                     "mine",
                 ),

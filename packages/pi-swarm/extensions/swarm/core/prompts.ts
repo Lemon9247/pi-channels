@@ -7,7 +7,7 @@
  * Directory structure:
  *   prompts/
  *   ├── roles/        agent.md, coordinator.md
- *   ├── tools/        hive-notify.md, hive-done.md, etc.
+ *   ├── tools/        message.md, hive-done.md, etc.
  *   └── patterns/     channels.md, coordination.md, etc.
  *
  * Template variables:
@@ -109,7 +109,7 @@ function generateChannelList(agentName: string, swarmAgents: string[], topicChan
     }
     lines.push(`- **General** (\`${GENERAL_CHANNEL}\`): Broadcast — all agents and the queen read this.${topicChannel ? " Use for cross-team announcements." : ""}`);
     lines.push(`- **Your Inbox** (\`${myInbox}\`): Only you read this. The queen and other agents can write here.`);
-    lines.push(`- **Queen Inbox** (\`${QUEEN_INBOX}\`): Send completion signals, blockers, and progress here.`);
+    lines.push(`- **Queen Inbox** (\`${QUEEN_INBOX}\`): Send completion signals and blockers here.`);
 
     if (others) {
         lines.push(`- **Other Agents**: ${others}`);
@@ -172,7 +172,7 @@ function substitute(template: string, vars: Record<string, string>): string {
 // ─── Prompt Builder ──────────────────────────────────────────────────
 
 /** Tool doc names for each role. */
-const AGENT_TOOLS = ["hive-notify", "hive-done", "hive-blocker", "hive-progress"];
+const AGENT_TOOLS = ["message", "hive-done", "hive-blocker"];
 const COORDINATOR_TOOLS = [...AGENT_TOOLS, "swarm-instruct", "swarm-status"];
 
 /**

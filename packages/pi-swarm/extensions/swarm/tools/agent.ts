@@ -2,8 +2,7 @@
  * Agent Tools
  *
  * Tools available to agents inside a swarm:
- * - hive_progress: Report progress to the dashboard
- * - hive_notify: Nudge teammates to check the hive-mind
+ * - message: Send a message through swarm channels (replaces hive_notify + hive_progress)
  * - hive_blocker: Signal that you're blocked
  * - hive_done: Signal task completion
  *
@@ -46,166 +45,90 @@ function sendToChannel(channelName: string, msg: Message): boolean {
 
 export function registerAgentTools(pi: ExtensionAPI): void {
     const identity = getIdentity();
-
-    // === hive_progress ===
-    pi.registerTool({
-        name: "hive_progress",
-        label: "Hive Progress",
-        description:
-            "Report your current progress to the swarm dashboard. " +
-            "Fire-and-forget — no response expected. Use this to show what phase you're in, " +
-            "how far along you are, or what you're currently doing.",
-        parameters: Type.Object({
-            phase: Type.Optional(Type.String({
-                description: "Current phase (e.g. 'reading files', 'running tests', 'writing report')",
-            })),
-            percent: Type.Optional(Type.Number({
-                description: "Completion percentage 0-100",
-            })),
-            detail: Type.Optional(Type.String({
-                description: "Short status line",
-            })),
-        }),
-        async execute(_toolCallId, params) {
-            const parts: string[] = [];
-            if (params.phase) parts.push(params.phase);
-            if (params.percent != null) parts.push(`${params.percent}%`);
-            if (params.detail) parts.push(params.detail);
-
-            const msg: Message = {
-                msg: parts.join(" — ") || "progress",
-                data: {
-                    type: "progress",
-                    from: identity.name,
-                    role: identity.role,
-                    phase: params.phase,
-                    percent: params.percent,
-                    detail: params.detail,
-                },
-            };
-
-            const sentQueen = sendToChannel(QUEEN_INBOX, msg);
-            const sentGeneral = sendToChannel(GENERAL_CHANNEL, msg);
-            if (!sentQueen && !sentGeneral) {
-                return {
-                    content: [{ type: "text", text: "Not connected to swarm channels. Progress not sent." }],
-                    details: {},
-                    isError: true,
-                };
-            }
-
-            return {
-                content: [{ type: "text", text: `Progress: ${parts.join(" — ") || "(empty)"}` }],
-                details: {},
-            };
-        },
-        renderCall(args, theme) {
-            const parts: string[] = [];
-            if (args.phase) parts.push(args.phase);
-            if (args.percent != null) parts.push(`${args.percent}%`);
-            if (args.detail) parts.push(args.detail);
-            return new Text(
-                theme.fg("toolTitle", theme.bold("hive_progress ")) +
-                    theme.fg("dim", parts.join(" — ") || "..."),
-                0,
-                0,
-            );
-        },
-        renderResult(result, _opts, theme) {
-            const text = result.content[0];
-            const content = text?.type === "text" ? text.text : "";
-            const color = result.isError ? "error" : "success";
-            return new Text(theme.fg(color, content), 0, 0);
-        },
-    });
-
-    // === hive_notify ===
     const topicChannel = process.env[ENV.TOPIC] || "";
+
+    // === message ===
     pi.registerTool({
-        name: "hive_notify",
-        label: "Hive Notify",
+        name: "message",
+        label: "Message",
         description:
-            "Nudge your swarm teammates to check the hive-mind file. " +
-            "Call this AFTER updating the hive-mind with your findings. " +
-            "The reason should be a short label — put details in the hive-mind file. " +
-            "Optional payload fields add context so recipients can triage without file I/O. " +
-            "Optional 'to' field sends only to a specific agent by name." +
+            "Send a message through swarm channels. The content IS the message — " +
+            "channels carry real information, not just labels pointing at files.\n\n" +
+            "Use this for coordination, sharing findings, asking questions, and progress updates. " +
+            "Reserve the notes file for persistent artifacts (code snippets, detailed analysis) " +
+            "that need to survive the session.\n\n" +
+            "Optional 'to' field sends to a specific agent. " +
+            "Optional 'progress' field updates the dashboard." +
             (topicChannel
-                ? " Defaults to your team channel. Set broadcast=true to send to general instead."
+                ? " Defaults to your team channel. Set broadcast=true for cross-team announcements."
                 : ""),
         parameters: Type.Object({
-            reason: Type.String({
-                description: "Brief description of what you added to the hive-mind",
+            content: Type.String({
+                description: "The message content — this is what recipients will read",
             }),
             to: Type.Optional(Type.String({
-                description: "Send only to a specific agent by name (omit to broadcast)",
+                description: "Send to a specific agent by name (omit to broadcast)",
             })),
             broadcast: Type.Optional(Type.Boolean({
-                description: "Send to general channel instead of team channel (for cross-team announcements)",
+                description: "Send to general channel instead of team channel",
             })),
-            file: Type.Optional(Type.String({
-                description: "File path that was updated",
-            })),
-            snippet: Type.Optional(Type.String({
-                description: "Short excerpt of what was added",
-            })),
-            section: Type.Optional(Type.String({
-                description: "Hive-mind section that was updated",
-            })),
-            tags: Type.Optional(Type.Array(Type.String(), {
-                description: "Topic tags for interest-based filtering",
+            progress: Type.Optional(Type.Object({
+                phase: Type.Optional(Type.String({
+                    description: "Current phase (e.g. 'reading files', 'running tests')",
+                })),
+                percent: Type.Optional(Type.Number({
+                    description: "Completion percentage 0-100",
+                })),
             })),
         }),
         async execute(_toolCallId, params) {
-            const payload: Record<string, unknown> = {};
-            if (params.file) payload.file = params.file;
-            if (params.snippet) payload.snippet = params.snippet;
-            if (params.section) payload.section = params.section;
-            if (params.tags) payload.tags = params.tags;
-
             const msg: Message = {
-                msg: params.reason,
+                msg: params.content,
                 data: {
-                    type: "nudge",
+                    type: "message",
                     from: identity.name,
                     role: identity.role,
-                    reason: params.reason,
+                    content: params.content,
                     to: params.to,
-                    ...payload,
+                    progress: params.progress,
                 },
             };
 
             let sent = false;
             if (params.to) {
-                // Targeted: send to specific agent's inbox + general so queen sees it
+                // Targeted: send to agent inbox + general so queen sees it
                 const sentInbox = sendToChannel(inboxName(params.to), msg);
                 const sentGeneral = sendToChannel(GENERAL_CHANNEL, msg);
                 sent = sentInbox || sentGeneral;
             } else if (topicChannel && !params.broadcast) {
-                // Team-scoped: send to topic channel (queen monitors it too)
+                // Team-scoped: topic channel (queen monitors it too)
                 sent = sendToChannel(topicChannel, msg);
             } else {
-                // Broadcast: send to general
+                // Broadcast: general channel
                 sent = sendToChannel(GENERAL_CHANNEL, msg);
             }
 
             if (!sent) {
                 return {
-                    content: [{ type: "text", text: "Not connected to swarm channels. Notification not sent." }],
+                    content: [{ type: "text", text: "Not connected to swarm channels. Message not sent." }],
                     details: {},
                     isError: true,
                 };
             }
 
             const target = params.to ? ` → ${params.to}` : topicChannel && !params.broadcast ? ` [${topicChannel}]` : "";
+            const preview = params.content.length > 60 ? params.content.slice(0, 60) + "…" : params.content;
             return {
-                content: [{ type: "text", text: `Nudge sent${target}: "${params.reason}"` }],
+                content: [{ type: "text", text: `Message sent${target}: "${preview}"` }],
                 details: {},
             };
         },
         renderCall(args, theme) {
-            let text = theme.fg("toolTitle", theme.bold("hive_notify ")) +
-                theme.fg("dim", args.reason || "...");
+            const preview = (args.content || "").length > 60
+                ? (args.content as string).slice(0, 60) + "…"
+                : (args.content || "...");
+            let text = theme.fg("toolTitle", theme.bold("message ")) +
+                theme.fg("dim", preview);
             if (args.to) {
                 text += theme.fg("accent", ` → ${args.to}`);
             }

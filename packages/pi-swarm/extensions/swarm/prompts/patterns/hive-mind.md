@@ -1,9 +1,9 @@
-## Hive-Mind
+## Notes File
 
-The hive-mind file is the swarm's shared memory — a markdown file that all agents read and write. Channels are ephemeral notifications; the hive-mind is the persistent record.
+The notes file is the swarm's shared persistent memory — a markdown file for artifacts that need to survive the session.
 
-**When to use channels vs hive-mind:**
-- Channels: "I updated the hive-mind" (nudge), "I'm done" (signal), "I'm blocked" (alert)
-- Hive-mind: detailed findings, code snippets, analysis, questions, status updates
+**When to use channels vs the notes file:**
+- Channels (`message` tool): real-time coordination, findings, questions, status updates. This is the primary communication surface.
+- Notes file: persistent artifacts — code snippets, detailed analysis, structured data, deliverables. Things that agents or humans will reference after the swarm ends.
 
-**CRITICAL — The hive-mind file is shared.** Multiple agents write to the same file. NEVER use the `write` tool on the hive-mind — it overwrites the entire file and destroys other agents' work. ALWAYS use the `edit` tool to surgically insert your content. Read the file first to see what's there, then use `edit` to add your findings below existing content.
+**CRITICAL — The notes file is shared.** Multiple agents write to the same file. NEVER use the `write` tool on the notes file — it overwrites the entire file and destroys other agents' work. ALWAYS use the `edit` tool to surgically insert your content. Read the file first to see what's there, then use `edit` to add your findings below existing content.

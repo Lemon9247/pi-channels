@@ -56,22 +56,22 @@ describe("flat swarm communication", () => {
             agents.set(name, channels);
         }
 
-        // === Test 1: Agent a1 sends nudge to general — all others see it ===
-        const nudgePromises = [
-            waitForMessage(queen.get(GENERAL_CHANNEL)!, "nudge"),
-            waitForMessage(agents.get("agent a2")!.get(GENERAL_CHANNEL)!, "nudge"),
-            waitForMessage(agents.get("agent a3")!.get(GENERAL_CHANNEL)!, "nudge"),
+        // === Test 1: Agent a1 sends message to general — all others see it ===
+        const messagePromises = [
+            waitForMessage(queen.get(GENERAL_CHANNEL)!, "message"),
+            waitForMessage(agents.get("agent a2")!.get(GENERAL_CHANNEL)!, "message"),
+            waitForMessage(agents.get("agent a3")!.get(GENERAL_CHANNEL)!, "message"),
         ];
 
         agents.get("agent a1")!.get(GENERAL_CHANNEL)!.send({
-            msg: "found something",
-            data: { type: "nudge", from: "agent a1", reason: "found something" },
+            msg: "Found the bug in connect()",
+            data: { type: "message", from: "agent a1", content: "Found the bug in connect()" },
         });
 
-        const [queenNudge, a2Nudge, a3Nudge] = await Promise.all(nudgePromises);
-        assert.equal(queenNudge.data?.from, "agent a1");
-        assert.equal(a2Nudge.data?.reason, "found something");
-        assert.equal(a3Nudge.data?.type, "nudge");
+        const [queenMsg, a2Msg, a3Msg] = await Promise.all(messagePromises);
+        assert.equal(queenMsg.data?.from, "agent a1");
+        assert.equal(a2Msg.data?.content, "Found the bug in connect()");
+        assert.equal(a3Msg.data?.type, "message");
 
         // === Test 2: Agent a2 sends blocker to queen inbox ===
         const blockerPromise = waitForMessage(queen.get(QUEEN_INBOX)!, "blocker");

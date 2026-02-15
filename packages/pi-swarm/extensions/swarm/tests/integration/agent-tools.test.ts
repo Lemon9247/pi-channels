@@ -1,7 +1,7 @@
 /**
  * Tests for agent tools
  *
- * Verifies that hive_notify, hive_done, hive_blocker, hive_progress
+ * Verifies that message, hive_done, hive_blocker
  * send correct messages to correct channels.
  */
 
@@ -143,81 +143,78 @@ describe("agent tools messaging", () => {
         assert.equal(msg.data?.description, "stuck on API");
     });
 
-    it("hive_notify sends to general channel", async () => {
+    it("message sends to general channel", async () => {
         const generalClient = queenMonitor.get(GENERAL_CHANNEL)!;
 
         const received = new Promise<Message>((resolve) => {
             generalClient.on("message", (msg: Message) => {
-                if (msg.data?.type === "nudge") resolve(msg);
+                if (msg.data?.type === "message") resolve(msg);
             });
         });
 
         agentClients.get(GENERAL_CHANNEL)!.send({
-            msg: "found important info",
+            msg: "Found the bug — race condition in connect()",
             data: {
-                type: "nudge",
+                type: "message",
                 from: "agent a1",
-                reason: "found important info",
-                section: "Findings",
+                content: "Found the bug — race condition in connect()",
             },
         });
 
         const msg = await received;
-        assert.equal(msg.data?.type, "nudge");
-        assert.equal(msg.data?.reason, "found important info");
-        assert.equal(msg.data?.section, "Findings");
+        assert.equal(msg.data?.type, "message");
+        assert.equal(msg.data?.content, "Found the bug — race condition in connect()");
     });
 
-    it("hive_notify with 'to' field sends to target inbox", async () => {
+    it("message with 'to' field sends to target inbox", async () => {
         // Simulate a second agent's inbox monitor
         const a2InboxMonitor = await connectToChannel(group.path, inboxName("agent a2"));
 
         const received = new Promise<Message>((resolve) => {
             a2InboxMonitor.on("message", (msg: Message) => {
-                if (msg.data?.type === "nudge") resolve(msg);
+                if (msg.data?.type === "message") resolve(msg);
             });
         });
 
         agentClients.get(inboxName("agent a2"))!.send({
-            msg: "check this",
+            msg: "Your module depends on types I'm refactoring",
             data: {
-                type: "nudge",
+                type: "message",
                 from: "agent a1",
-                reason: "check this",
+                content: "Your module depends on types I'm refactoring",
                 to: "agent a2",
             },
         });
 
         const msg = await received;
         assert.equal(msg.data?.to, "agent a2");
+        assert.equal(msg.data?.content, "Your module depends on types I'm refactoring");
 
         a2InboxMonitor.disconnect();
     });
 
-    it("hive_progress sends to queen inbox", async () => {
-        const queenInboxClient = queenMonitor.get(QUEEN_INBOX)!;
+    it("message with progress metadata sends to general", async () => {
+        const generalClient = queenMonitor.get(GENERAL_CHANNEL)!;
 
         const received = new Promise<Message>((resolve) => {
-            queenInboxClient.on("message", (msg: Message) => {
-                if (msg.data?.type === "progress") resolve(msg);
+            generalClient.on("message", (msg: Message) => {
+                if (msg.data?.type === "message") resolve(msg);
             });
         });
 
-        agentClients.get(QUEEN_INBOX)!.send({
-            msg: "reading files — 25%",
+        agentClients.get(GENERAL_CHANNEL)!.send({
+            msg: "Finished reading all test files",
             data: {
-                type: "progress",
+                type: "message",
                 from: "agent a1",
-                phase: "reading files",
-                percent: 25,
-                detail: "scanning core/",
+                content: "Finished reading all test files",
+                progress: { phase: "analyzing", percent: 40 },
             },
         });
 
         const msg = await received;
-        assert.equal(msg.data?.type, "progress");
-        assert.equal(msg.data?.phase, "reading files");
-        assert.equal(msg.data?.percent, 25);
-        assert.equal(msg.data?.detail, "scanning core/");
+        assert.equal(msg.data?.type, "message");
+        assert.equal(msg.data?.content, "Finished reading all test files");
+        assert.deepEqual(msg.data?.progress, { phase: "analyzing", percent: 40 });
     });
 });
