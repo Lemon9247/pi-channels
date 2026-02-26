@@ -148,19 +148,22 @@ function handleRelayEvent(
         pushSyntheticEvent(name, "message", `registered (${role}, ${swarm})`);
     } else if (event === "done") {
         const summary = relay.summary as string | undefined;
+        const disposition = relay.disposition as string | undefined;
+        const targetStatus = (disposition === "idle") ? "idle" as const : "done" as const;
         if (existing) {
-            updateAgentStatus(name, "done", { doneSummary: summary });
+            updateAgentStatus(name, targetStatus, { doneSummary: summary });
         } else {
             state.agents.set(name, {
                 name,
                 role: role as "coordinator" | "agent",
                 swarm,
                 task: "(sub-agent)",
-                status: "done",
+                status: targetStatus,
                 doneSummary: summary,
             });
         }
-        pushSyntheticEvent(name, "tool_end", `✓ done: ${summary || "completed"}`);
+        const icon = targetStatus === "idle" ? "💤" : "✓";
+        pushSyntheticEvent(name, "tool_end", `${icon} ${targetStatus}: ${summary || "completed"}`);
     } else if (event === "blocked") {
         const description = relay.description as string | undefined;
         if (existing) {
@@ -221,7 +224,7 @@ function handleQueenMessage(
     // Dedup: messages sent to both QUEEN_INBOX and GENERAL (defense-in-depth)
     // are only processed from QUEEN_INBOX. General is the fallback channel —
     // if the queen got it on QUEEN_INBOX, ignore the duplicate on general.
-    const primaryOnQueenInbox = ["done", "blocker", "register"];
+    const primaryOnQueenInbox = ["done", "dismiss", "blocker", "register"];
     if (primaryOnQueenInbox.includes(type) && fromChannel === GENERAL_CHANNEL) {
         return;
     }
@@ -237,10 +240,32 @@ function handleQueenMessage(
 
         case "done": {
             const summary = (msg.data.summary as string) || "";
+            const disposition = (msg.data.disposition as string) || "idle";
+
+            if (disposition === "idle" || !disposition) {
+                // Agent completed task but stays alive — transition to idle
+                if (updateAgentStatus(senderName, "idle", { doneSummary: summary })) {
+                    state.onAgentDone?.(senderName, summary);
+                    updateDashboard(ctx);
+                    relayToParent("done", senderName, agentMap.get(senderName), { summary, disposition: "idle" });
+                }
+            } else {
+                // Legacy or explicit done — terminal state
+                if (updateAgentStatus(senderName, "done", { doneSummary: summary })) {
+                    state.onAgentDone?.(senderName, summary);
+                    updateDashboard(ctx);
+                    relayToParent("done", senderName, agentMap.get(senderName), { summary });
+                }
+            }
+            break;
+        }
+
+        case "dismiss": {
+            const summary = (msg.data.summary as string) || "";
             if (updateAgentStatus(senderName, "done", { doneSummary: summary })) {
-                state.onAgentDone?.(senderName, summary);
+                pushSyntheticEvent(senderName, "tool_end", `✓ dismissed: ${summary || "completed"}`);
                 updateDashboard(ctx);
-                relayToParent("done", senderName, agentMap.get(senderName), { summary });
+                relayToParent("done", senderName, agentMap.get(senderName), { summary, disposition: "dismissed" });
             }
             break;
         }
@@ -474,30 +499,68 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
             };
 
             // Wire up notifications to pi.sendMessage
-            state.onAgentDone = (_agentName, _summary) => {
+            state.onAgentDone = (agentName, summary) => {
                 if (getSwarmGeneration() !== gen) return;
-                // Dashboard update handled by handleQueenMessage after status update
+                const agent = state.agents.get(agentName);
+                const isIdle = agent?.status === "idle";
+                if (isIdle) {
+                    bufferedSendMessage(pi,
+                        {
+                            customType: "swarm-agent-idle",
+                            content:
+                                `💤 **${agentName}** is idle: ${summary || "(no summary)"}\n\n` +
+                                "Use `swarm_instruct` to re-task or dismiss this agent.",
+                            display: true,
+                        },
+                        { deliverAs: "followUp" },
+                    );
+                }
             };
 
             state.onAllDone = () => {
                 if (getSwarmGeneration() !== gen) return;
-                bufferedSendMessage(pi,
-                    {
-                        customType: "swarm-complete",
-                        content:
-                            "🐝 **All swarm agents have completed.**\n\n" +
-                            "Read the hive-mind file and agent reports to synthesize findings. " +
-                            "Use `swarm_status` to see individual results.",
-                        display: true,
-                    },
-                    { deliverAs: "followUp", triggerTurn: true },
+
+                // Check if any agents are idle (vs all truly done/crashed/disconnected)
+                const agents = Array.from(state.agents.values());
+                const idleCount = agents.filter(a => a.status === "idle").length;
+                const allTerminal = agents.every(
+                    a => a.status === "done" || a.status === "crashed" || a.status === "disconnected",
                 );
-                updateDashboard(ctx);
-                // Clear the widget after a brief delay so the user sees the final state
-                setTimeout(() => {
-                    if (getSwarmGeneration() !== gen) return;
-                    clearDashboard(true);
-                }, 3000);
+
+                if (allTerminal) {
+                    // All agents truly done — swarm is complete
+                    bufferedSendMessage(pi,
+                        {
+                            customType: "swarm-complete",
+                            content:
+                                "🐝 **All swarm agents have completed.**\n\n" +
+                                "Read the hive-mind file and agent reports to synthesize findings. " +
+                                "Use `swarm_status` to see individual results.",
+                            display: true,
+                        },
+                        { deliverAs: "followUp", triggerTurn: true },
+                    );
+                    updateDashboard(ctx);
+                    // Clear the widget after a brief delay so the user sees the final state
+                    setTimeout(() => {
+                        if (getSwarmGeneration() !== gen) return;
+                        clearDashboard(true);
+                    }, 3000);
+                } else if (idleCount > 0) {
+                    // All agents finished but some are idle — ready for re-tasking or dismissal
+                    bufferedSendMessage(pi,
+                        {
+                            customType: "swarm-all-idle",
+                            content:
+                                `🐝 **All swarm agents have finished their tasks.** ${idleCount} agent${idleCount !== 1 ? "s are" : " is"} idle.\n\n` +
+                                "Use `swarm_instruct` to re-task idle agents with follow-up work, or dismiss them. " +
+                                "Use `swarm_status` to see individual results.",
+                            display: true,
+                        },
+                        { deliverAs: "followUp", triggerTurn: true },
+                    );
+                    updateDashboard(ctx);
+                }
             };
 
             state.onBlocker = (agentName, description) => {
@@ -562,7 +625,8 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                     const current = getSwarmState();
                     if (!current) return;
                     const agent = current.agents.get(agentDef.name);
-                    if (agent && agent.status !== "done") {
+                    // Terminal states: no further transitions needed
+                    if (agent && agent.status !== "done" && agent.status !== "crashed" && agent.status !== "disconnected") {
                         if (code === 0) {
                             updateAgentStatus(agentDef.name, "done");
                         } else {

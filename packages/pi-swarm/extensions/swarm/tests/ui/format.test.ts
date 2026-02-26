@@ -10,8 +10,29 @@ import * as os from "node:os";
 import {
     shortenPath,
     formatUsageStats,
+    statusIcon,
     type UsageStats,
 } from "../../ui/format.js";
+
+// ─── statusIcon ──────────────────────────────────────────────────────
+
+describe("statusIcon", () => {
+    it("returns 💤 for idle status", () => {
+        assert.equal(statusIcon("idle"), "💤");
+    });
+
+    it("returns ⏳ for running status", () => {
+        assert.equal(statusIcon("running"), "⏳");
+    });
+
+    it("returns ✓ for done status", () => {
+        assert.equal(statusIcon("done"), "✓");
+    });
+
+    it("returns ? for unknown status", () => {
+        assert.equal(statusIcon("unknown" as any), "?");
+    });
+});
 
 // ─── shortenPath ─────────────────────────────────────────────────────
 

@@ -15,6 +15,7 @@ export function statusIcon(status: AgentStatus): string {
     switch (status) {
         case "starting": return "◌";
         case "running": return "⏳";
+        case "idle": return "💤";
         case "done": return "✓";
         case "blocked": return "⚠";
         case "disconnected": return "✗";

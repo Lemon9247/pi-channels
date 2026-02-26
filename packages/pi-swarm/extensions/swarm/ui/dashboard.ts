@@ -21,10 +21,11 @@ let refreshTimer: ReturnType<typeof setInterval> | null = null;
 function summarize(agents: AgentInfo[]) {
     const total = agents.length;
     const done = agents.filter(a => a.status === "done").length;
+    const idle = agents.filter(a => a.status === "idle").length;
     const running = agents.filter(a => a.status === "running" || a.status === "starting").length;
     const blocked = agents.filter(a => a.status === "blocked").length;
     const failed = agents.filter(a => a.status === "crashed" || a.status === "disconnected").length;
-    return { total, done, running, blocked, failed };
+    return { total, done, idle, running, blocked, failed };
 }
 
 /**
@@ -59,8 +60,9 @@ export function updateDashboard(ctx?: any): void {
 
     // Status bar: compact summary with aggregate cost
     const agents = Array.from(state.agents.values());
-    const { total, done, running, blocked, failed } = summarize(agents);
+    const { total, done, idle, running, blocked, failed } = summarize(agents);
     let statusText = `🐝 ${done}/${total}`;
+    if (idle > 0) statusText += ` 💤${idle}`;
     if (running > 0) statusText += ` ⏳${running}`;
     if (blocked > 0) statusText += ` ⚠${blocked}`;
     if (failed > 0) statusText += ` ✗${failed}`;
@@ -72,7 +74,8 @@ export function updateDashboard(ctx?: any): void {
     // Widget: flat list grouped by swarm
     const widgetLines: string[] = [];
 
-    widgetLines.push(`🐝 Swarm — ${done}/${total} complete`);
+    const completed = done + idle;
+    widgetLines.push(`🐝 Swarm — ${completed}/${total} complete${idle > 0 ? ` (${idle} idle)` : ""}`);
     if (state.taskDirPath) {
         widgetLines.push(`   task: ${state.taskDirPath}`);
     }
@@ -108,7 +111,11 @@ export function updateDashboard(ctx?: any): void {
             }
 
             let detail = "";
-            if (agent.status === "done" && agent.doneSummary) {
+            if (agent.status === "idle") {
+                detail = agent.doneSummary
+                    ? `idle — ${agent.doneSummary.length > 40 ? agent.doneSummary.slice(0, 40) + "…" : agent.doneSummary}`
+                    : "idle — awaiting instructions";
+            } else if (agent.status === "done" && agent.doneSummary) {
                 detail = agent.doneSummary.length > 50
                     ? agent.doneSummary.slice(0, 50) + "…"
                     : agent.doneSummary;
