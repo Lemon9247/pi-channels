@@ -9,7 +9,7 @@
 import type { ChildProcess } from "node:child_process";
 import type { ChannelGroup, ChannelClient } from "agent-channels";
 
-export type AgentStatus = "starting" | "running" | "done" | "blocked" | "disconnected" | "crashed";
+export type AgentStatus = "starting" | "running" | "idle" | "done" | "blocked" | "disconnected" | "crashed";
 
 export interface AgentInfo {
     name: string;
@@ -73,18 +73,23 @@ export function pushMessage(entry: MessageEntry): void {
  * Key = current status, value = set of allowed next statuses.
  *
  * Transition rules:
- * - starting → running (registered), done (completed fast), blocked, crashed (failed to start), disconnected
- * - running → done (hive_done), blocked (hive_blocker), crashed (timeout/error), disconnected (process exited)
- * - blocked → running (unblocked), done (completed despite blocker), crashed (timeout), disconnected
+ * - starting → running (registered), idle (fast agent race), done (completed fast), blocked, crashed (failed to start), disconnected
+ * - running → idle (hive_done, agent stays alive), done (legacy/direct), blocked (hive_blocker), crashed (timeout/error), disconnected (process exited)
+ * - idle → running (re-tasked via swarm_instruct), done (dismissed via hive_dismiss), crashed, disconnected
+ * - blocked → running (unblocked), idle (unblocked but not resuming), done (completed despite blocker), crashed (timeout), disconnected
  * - done/crashed/disconnected → terminal, no transitions out
  *
- * starting allows done/blocked because an agent may send hive_done or hive_blocker
+ * starting allows done/blocked/idle because an agent may send hive_done or hive_blocker
  * before the register message arrives (race condition in fast agents).
+ *
+ * idle is a non-terminal resting state: agent has completed its task but remains
+ * alive and connected, ready for re-tasking or dismissal.
  */
 export const VALID_TRANSITIONS: Record<AgentStatus, Set<AgentStatus>> = {
-    starting:      new Set(["running", "done", "blocked", "crashed", "disconnected"]),
-    running:       new Set(["done", "blocked", "crashed", "disconnected"]),
-    blocked:       new Set(["running", "done", "crashed", "disconnected"]),
+    starting:      new Set(["running", "idle", "done", "blocked", "crashed", "disconnected"]),
+    running:       new Set(["idle", "done", "blocked", "crashed", "disconnected"]),
+    idle:          new Set(["running", "done", "crashed", "disconnected"]),
+    blocked:       new Set(["running", "idle", "done", "crashed", "disconnected"]),
     done:          new Set(),
     crashed:       new Set(),
     disconnected:  new Set(),
@@ -152,7 +157,7 @@ export function updateAgentStatus(name: string, status: AgentStatus, extra?: Par
 function checkAllDone(): void {
     if (!activeSwarm) return;
     const allDone = Array.from(activeSwarm.agents.values()).every(
-        (a) => a.status === "done" || a.status === "crashed" || a.status === "disconnected",
+        (a) => a.status === "idle" || a.status === "done" || a.status === "crashed" || a.status === "disconnected",
     );
     if (allDone) {
         activeSwarm.onAllDone?.();
@@ -175,7 +180,7 @@ export async function gracefulShutdown(
         await new Promise((r) => setTimeout(r, 2000));
         if (!activeSwarm || activeSwarm.generation !== gen) return;
         const allFinished = Array.from(activeSwarm.agents.values()).every(
-            (a) => a.status === "done" || a.status === "crashed" || a.status === "disconnected",
+            (a) => a.status === "idle" || a.status === "done" || a.status === "crashed" || a.status === "disconnected",
         );
         if (allFinished) break;
     }
