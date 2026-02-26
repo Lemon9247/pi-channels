@@ -200,7 +200,7 @@ export function registerAgentTools(pi: ExtensionAPI): void {
         label: "Hive Done",
         description:
             "Signal that your task is complete. " +
-            "After calling this, you will go idle and wait for further instructions or dismissal. " +
+            "After calling this, you will go idle — do not exit. Wait for further instructions or dismissal. " +
             "Include a one-line summary of what you accomplished.",
         parameters: Type.Object({
             summary: Type.String({

@@ -240,9 +240,9 @@ function handleQueenMessage(
 
         case "done": {
             const summary = (msg.data.summary as string) || "";
-            const disposition = (msg.data.disposition as string) || "idle";
+            const disposition = (msg.data.disposition as string) || "done";
 
-            if (disposition === "idle" || !disposition) {
+            if (disposition === "idle") {
                 // Agent completed task but stays alive — transition to idle
                 if (updateAgentStatus(senderName, "idle", { doneSummary: summary })) {
                     state.onAgentDone?.(senderName, summary);

@@ -154,6 +154,11 @@ export function updateAgentStatus(name: string, status: AgentStatus, extra?: Par
     return true;
 }
 
+/**
+ * Check if all agents have reached a resting state.
+ * "All done" means all agents are either idle (completed task, awaiting re-task/dismiss)
+ * or terminal (done/crashed/disconnected). Fires onAllDone when no agents are actively working.
+ */
 function checkAllDone(): void {
     if (!activeSwarm) return;
     const allDone = Array.from(activeSwarm.agents.values()).every(
@@ -172,7 +177,7 @@ export async function gracefulShutdown(
 ): Promise<void> {
     const gen = swarmGeneration;
     sendInstruct(
-        "Wrap up your current work, write findings to hive-mind, and call hive_done. You have 30 seconds.",
+        "Wrap up your current work and call hive_done, or call hive_dismiss if you are already idle. You have 30 seconds.",
     );
 
     const deadline = Date.now() + 30_000;
