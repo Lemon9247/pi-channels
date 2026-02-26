@@ -200,7 +200,7 @@ export function registerAgentTools(pi: ExtensionAPI): void {
         label: "Hive Done",
         description:
             "Signal that your task is complete. " +
-            "Call this as the LAST thing you do. " +
+            "After calling this, you will go idle and wait for further instructions or dismissal. " +
             "Include a one-line summary of what you accomplished.",
         parameters: Type.Object({
             summary: Type.String({
@@ -215,6 +215,7 @@ export function registerAgentTools(pi: ExtensionAPI): void {
                     from: identity.name,
                     role: identity.role,
                     summary: params.summary,
+                    disposition: "idle",
                 },
             };
 
@@ -238,6 +239,61 @@ export function registerAgentTools(pi: ExtensionAPI): void {
         renderCall(args, theme) {
             return new Text(
                 theme.fg("toolTitle", theme.bold("hive_done ")) +
+                    theme.fg("success", args.summary || "..."),
+                0,
+                0,
+            );
+        },
+        renderResult(result, _opts, theme) {
+            const text = result.content[0];
+            const content = text?.type === "text" ? text.text : "";
+            return new Text(theme.fg(result.isError ? "error" : "success", content), 0, 0);
+        },
+    });
+
+    // === hive_dismiss ===
+    pi.registerTool({
+        name: "hive_dismiss",
+        label: "Hive Dismiss",
+        description:
+            "Call this when you are idle and have been told to exit, " +
+            "or when you have no more work to do and want to leave the swarm.",
+        parameters: Type.Object({
+            summary: Type.Optional(Type.String({
+                description: "Brief reason for dismissal",
+            })),
+        }),
+        async execute(_toolCallId, params) {
+            const msg: Message = {
+                msg: params.summary || "dismissed",
+                data: {
+                    type: "dismiss",
+                    from: identity.name,
+                    role: identity.role,
+                    summary: params.summary,
+                },
+            };
+
+            // Send to both queen inbox and general
+            const sentQueen = sendToChannel(QUEEN_INBOX, msg);
+            const sentGeneral = sendToChannel(GENERAL_CHANNEL, msg);
+
+            if (!sentQueen && !sentGeneral) {
+                return {
+                    content: [{ type: "text", text: "Not connected to swarm channels. Dismiss signal not sent." }],
+                    details: {},
+                    isError: true,
+                };
+            }
+
+            return {
+                content: [{ type: "text", text: `Dismissed: "${params.summary || "no reason given"}"` }],
+                details: {},
+            };
+        },
+        renderCall(args, theme) {
+            return new Text(
+                theme.fg("toolTitle", theme.bold("hive_dismiss ")) +
                     theme.fg("success", args.summary || "..."),
                 0,
                 0,

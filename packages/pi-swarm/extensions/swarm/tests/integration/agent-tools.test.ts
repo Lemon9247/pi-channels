@@ -193,6 +193,92 @@ describe("agent tools messaging", () => {
         a2InboxMonitor.disconnect();
     });
 
+    it("hive_done sends message with disposition idle", async () => {
+        const queenInboxClient = queenMonitor.get(QUEEN_INBOX)!;
+
+        const received = new Promise<Message>((resolve) => {
+            queenInboxClient.on("message", (msg: Message) => {
+                if (msg.data?.type === "done") resolve(msg);
+            });
+        });
+
+        const doneMsg: Message = {
+            msg: "finished analysis",
+            data: {
+                type: "done",
+                from: "agent a1",
+                summary: "finished analysis",
+                disposition: "idle",
+            },
+        };
+        agentClients.get(QUEEN_INBOX)!.send(doneMsg);
+
+        const msg = await received;
+        assert.equal(msg.data?.type, "done");
+        assert.equal(msg.data?.disposition, "idle");
+        assert.equal(msg.data?.summary, "finished analysis");
+    });
+
+    it("hive_dismiss sends to queen inbox and general with type dismiss", async () => {
+        const queenInboxClient = queenMonitor.get(QUEEN_INBOX)!;
+        const generalClient = queenMonitor.get(GENERAL_CHANNEL)!;
+
+        const queenReceived = new Promise<Message>((resolve) => {
+            queenInboxClient.on("message", (msg: Message) => {
+                if (msg.data?.type === "dismiss") resolve(msg);
+            });
+        });
+
+        const generalReceived = new Promise<Message>((resolve) => {
+            generalClient.on("message", (msg: Message) => {
+                if (msg.data?.type === "dismiss") resolve(msg);
+            });
+        });
+
+        const dismissMsg: Message = {
+            msg: "no more work",
+            data: {
+                type: "dismiss",
+                from: "agent a1",
+                summary: "no more work",
+            },
+        };
+        agentClients.get(QUEEN_INBOX)!.send(dismissMsg);
+        agentClients.get(GENERAL_CHANNEL)!.send(dismissMsg);
+
+        const qMsg = await queenReceived;
+        const gMsg = await generalReceived;
+
+        assert.equal(qMsg.data?.type, "dismiss");
+        assert.equal(qMsg.data?.from, "agent a1");
+        assert.equal(gMsg.data?.type, "dismiss");
+        assert.equal(gMsg.data?.from, "agent a1");
+    });
+
+    it("hive_dismiss message includes the summary", async () => {
+        const queenInboxClient = queenMonitor.get(QUEEN_INBOX)!;
+
+        const received = new Promise<Message>((resolve) => {
+            queenInboxClient.on("message", (msg: Message) => {
+                if (msg.data?.type === "dismiss") resolve(msg);
+            });
+        });
+
+        const dismissMsg: Message = {
+            msg: "all tasks completed, shutting down",
+            data: {
+                type: "dismiss",
+                from: "agent a1",
+                summary: "all tasks completed, shutting down",
+            },
+        };
+        agentClients.get(QUEEN_INBOX)!.send(dismissMsg);
+
+        const msg = await received;
+        assert.equal(msg.data?.type, "dismiss");
+        assert.equal(msg.data?.summary, "all tasks completed, shutting down");
+    });
+
     it("message with progress metadata sends to general", async () => {
         const generalClient = queenMonitor.get(GENERAL_CHANNEL)!;
 
