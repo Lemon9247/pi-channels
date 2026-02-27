@@ -10,8 +10,68 @@ import * as os from "node:os";
 import {
     shortenPath,
     formatUsageStats,
+    statusIcon,
+    shortModelName,
     type UsageStats,
 } from "../../ui/format.js";
+
+// ─── statusIcon ──────────────────────────────────────────────────────
+
+describe("statusIcon", () => {
+    it("returns 💤 for idle status", () => {
+        assert.equal(statusIcon("idle"), "💤");
+    });
+
+    it("returns ⏳ for running status", () => {
+        assert.equal(statusIcon("running"), "⏳");
+    });
+
+    it("returns ✓ for done status", () => {
+        assert.equal(statusIcon("done"), "✓");
+    });
+
+    it("returns ? for unknown status", () => {
+        assert.equal(statusIcon("unknown" as any), "?");
+    });
+});
+
+// ─── shortModelName ──────────────────────────────────────────────────
+
+describe("shortModelName", () => {
+    it("strips claude- prefix and date suffix", () => {
+        assert.equal(shortModelName("claude-haiku-4-5-20250514"), "haiku-4-5");
+        assert.equal(shortModelName("claude-sonnet-4-5-20250514"), "sonnet-4-5");
+        assert.equal(shortModelName("claude-opus-4-5-20241231"), "opus-4-5");
+    });
+
+    it("strips claude- prefix when no date suffix", () => {
+        assert.equal(shortModelName("claude-sonnet-4-5"), "sonnet-4-5");
+        assert.equal(shortModelName("claude-haiku"), "haiku");
+    });
+
+    it("strips date suffix when no claude- prefix", () => {
+        assert.equal(shortModelName("custom-model-20250514"), "custom-model");
+    });
+
+    it("returns model as-is if no prefix or suffix to strip", () => {
+        assert.equal(shortModelName("gpt-4"), "gpt-4");
+        assert.equal(shortModelName("unknown-model"), "unknown-model");
+    });
+
+    it("returns undefined for undefined input", () => {
+        assert.equal(shortModelName(undefined), undefined);
+    });
+
+    it("handles empty string", () => {
+        assert.equal(shortModelName(""), "");
+    });
+
+    it("only strips 8-digit date suffixes", () => {
+        assert.equal(shortModelName("claude-model-2025"), "claude-model-2025");
+        assert.equal(shortModelName("claude-model-202505"), "claude-model-202505");
+        assert.equal(shortModelName("claude-model-20250514"), "model");
+    });
+});
 
 // ─── shortenPath ─────────────────────────────────────────────────────
 

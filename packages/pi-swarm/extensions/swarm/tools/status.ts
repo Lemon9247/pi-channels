@@ -9,6 +9,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getSwarmState, type AgentInfo } from "../core/state.js";
+import { shortModelName } from "../ui/format.js";
 
 function statusIcon(status: string): string {
     switch (status) {
@@ -16,6 +17,8 @@ function statusIcon(status: string): string {
             return "🔄";
         case "running":
             return "⏳";
+        case "idle":
+            return "💤";
         case "done":
             return "✅";
         case "blocked":
@@ -46,13 +49,16 @@ export function registerStatusTool(pi: ExtensionAPI): void {
 
             const agents = Array.from(state.agents.values());
             const running = agents.filter((a) => a.status === "running" || a.status === "starting").length;
+            const idle = agents.filter((a) => a.status === "idle").length;
             const done = agents.filter((a) => a.status === "done").length;
             const blocked = agents.filter((a) => a.status === "blocked").length;
             const failed = agents.filter((a) => a.status === "crashed" || a.status === "disconnected").length;
 
             let report = `## Swarm Status\n\n`;
             report += `**Total:** ${agents.length} agents | `;
-            report += `Running: ${running} | Done: ${done}`;
+            report += `Running: ${running}`;
+            if (idle > 0) report += ` | Idle: ${idle}`;
+            report += ` | Done: ${done}`;
             if (blocked > 0) report += ` | Blocked: ${blocked}`;
             if (failed > 0) report += ` | Failed: ${failed}`;
             report += "\n\n";
@@ -71,7 +77,20 @@ export function registerStatusTool(pi: ExtensionAPI): void {
             for (const [swarmName, swarmAgents] of bySwarm) {
                 report += `### ${swarmName}\n`;
                 for (const agent of swarmAgents) {
-                    report += `- ${statusIcon(agent.status)} **${agent.name}** (${agent.role}) — ${agent.status}`;
+                    // Display archetype + model instead of just role
+                    let roleDisplay: string;
+                    if (agent.agentType && agent.model) {
+                        roleDisplay = `${agent.agentType}/${shortModelName(agent.model)}`;
+                    } else if (agent.agentType) {
+                        roleDisplay = agent.agentType;
+                    } else if (agent.model) {
+                        const role = agent.role === "coordinator" ? "coordinator" : "agent";
+                        roleDisplay = `${role}/${shortModelName(agent.model)}`;
+                    } else {
+                        roleDisplay = agent.role;
+                    }
+
+                    report += `- ${statusIcon(agent.status)} **${agent.name}** (${roleDisplay}) — ${agent.status}`;
                     if (agent.doneSummary) report += `\n  Done: ${agent.doneSummary}`;
                     if (agent.blockerDescription) report += `\n  Blocked: ${agent.blockerDescription}`;
                     if (agent.progressPhase || agent.progressPercent != null || agent.progressDetail) {
@@ -91,6 +110,7 @@ export function registerStatusTool(pi: ExtensionAPI): void {
                 details: {
                     total: agents.length,
                     running,
+                    idle,
                     done,
                     blocked,
                     failed,
@@ -99,6 +119,8 @@ export function registerStatusTool(pi: ExtensionAPI): void {
                         role: a.role,
                         swarm: a.swarm,
                         status: a.status,
+                        model: a.model,
+                        agentType: a.agentType,
                     })),
                 },
             };
@@ -117,9 +139,10 @@ export function registerStatusTool(pi: ExtensionAPI): void {
                 return new Text(theme.fg("muted", text.text), 0, 0);
             }
 
-            const { total, running, done, blocked, failed } = details;
+            const { total, running, idle, done, blocked, failed } = details;
             let summary = theme.fg("toolTitle", theme.bold("swarm "));
             summary += theme.fg("accent", `${done}/${total} done`);
+            if (idle > 0) summary += theme.fg("muted", ` ${idle} idle`);
             if (running > 0) summary += theme.fg("warning", ` ${running} running`);
             if (blocked > 0) summary += theme.fg("error", ` ${blocked} blocked`);
             if (failed > 0) summary += theme.fg("error", ` ${failed} failed`);
