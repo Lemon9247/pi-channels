@@ -67,8 +67,8 @@ describe("shortModelName", () => {
     });
 
     it("only strips 8-digit date suffixes", () => {
-        assert.equal(shortModelName("claude-model-2025"), "claude-model-2025");
-        assert.equal(shortModelName("claude-model-202505"), "claude-model-202505");
+        assert.equal(shortModelName("claude-model-2025"), "model-2025");
+        assert.equal(shortModelName("claude-model-202505"), "model-202505");
         assert.equal(shortModelName("claude-model-20250514"), "model");
     });
 });

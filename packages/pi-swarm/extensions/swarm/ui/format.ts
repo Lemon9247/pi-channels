@@ -86,7 +86,8 @@ export function formatTokens(count: number): string {
  * - unknown-model → unknown-model
  */
 export function shortModelName(model: string | undefined): string | undefined {
-    if (!model) return undefined;
+    if (model === undefined) return undefined;
+    if (model === "") return "";
 
     // Strip leading "claude-"
     let short = model.startsWith("claude-") ? model.slice(7) : model;
