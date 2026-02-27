@@ -13,7 +13,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import type { ChannelClient, Message } from "agent-channels";
-import { getParentClients } from "../core/state.js";
+import { getParentClients, setParentClients } from "../core/state.js";
 import { getIdentity } from "../core/identity.js";
 import { GENERAL_CHANNEL, QUEEN_INBOX, ENV, inboxName } from "../core/channels.js";
 
@@ -201,7 +201,8 @@ export function registerAgentTools(pi: ExtensionAPI): void {
         description:
             "Signal that your task is complete. " +
             "Call this as the LAST thing you do. " +
-            "Include a one-line summary of what you accomplished.",
+            "Include a one-line summary of what you accomplished. " +
+            "All channel connections are disconnected after signaling — no further messages will be received.",
         parameters: Type.Object({
             summary: Type.String({
                 description: "One-line summary of completed work",
@@ -221,6 +222,16 @@ export function registerAgentTools(pi: ExtensionAPI): void {
             // Send to both queen inbox and general
             const sentQueen = sendToChannel(QUEEN_INBOX, msg);
             const sentGeneral = sendToChannel(GENERAL_CHANNEL, msg);
+
+            // Disconnect all channels to prevent incoming messages
+            // from triggering new LLM turns after we've signalled done.
+            const clients = getParentClients();
+            if (clients) {
+                for (const client of clients.values()) {
+                    try { client.disconnect(); } catch { /* ignore */ }
+                }
+                setParentClients(null);
+            }
 
             if (!sentQueen && !sentGeneral) {
                 return {

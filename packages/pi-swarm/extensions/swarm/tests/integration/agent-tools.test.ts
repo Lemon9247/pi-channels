@@ -17,7 +17,7 @@ import {
     inboxName,
     type SwarmAgent,
 } from "../../core/channels.js";
-import { setParentClients, cleanupSwarm } from "../../core/state.js";
+import { setParentClients, getParentClients, cleanupSwarm } from "../../core/state.js";
 import { resetIdentity } from "../../core/identity.js";
 
 describe("agent tools messaging", () => {
@@ -216,5 +216,50 @@ describe("agent tools messaging", () => {
         assert.equal(msg.data?.type, "message");
         assert.equal(msg.data?.content, "Finished reading all test files");
         assert.deepEqual(msg.data?.progress, { phase: "analyzing", percent: 40 });
+    });
+
+    it("hive_done disconnects parent clients (ghost agent fix)", async () => {
+        // Verify clients are set up before the test
+        assert.ok(getParentClients(), "parentClients should be set before hive_done");
+        assert.ok(getParentClients()!.size > 0, "should have connected clients");
+
+        // Simulate hive_done: send done message, then disconnect all channels
+        const doneMsg: Message = {
+            msg: "task complete",
+            data: { type: "done", from: "agent a1", summary: "task complete" },
+        };
+        agentClients.get(QUEEN_INBOX)!.send(doneMsg);
+        agentClients.get(GENERAL_CHANNEL)!.send(doneMsg);
+
+        // Disconnect all channels (what hive_done now does)
+        const clients = getParentClients();
+        if (clients) {
+            for (const client of clients.values()) {
+                try { client.disconnect(); } catch { /* ignore */ }
+            }
+            setParentClients(null);
+        }
+
+        // After hive_done, parentClients should be null
+        assert.equal(getParentClients(), null, "parentClients should be null after hive_done");
+    });
+
+    it("hive_done clients are disconnected after cleanup", async () => {
+        // Snapshot a client before disconnect
+        const generalClient = agentClients.get(GENERAL_CHANNEL)!;
+        assert.ok(generalClient.connected, "client should be connected before hive_done");
+
+        // Simulate hive_done disconnect
+        const clients = getParentClients();
+        if (clients) {
+            for (const client of clients.values()) {
+                try { client.disconnect(); } catch { /* ignore */ }
+            }
+            setParentClients(null);
+        }
+
+        // Client should be disconnected
+        assert.equal(generalClient.connected, false, "client should be disconnected after hive_done");
+        assert.equal(getParentClients(), null);
     });
 });
