@@ -23,6 +23,8 @@ export interface AgentInfo {
     progressPhase?: string;
     progressPercent?: number;
     progressDetail?: string;
+    model?: string;
+    agentType?: string;
 }
 
 export interface MessageEntry {

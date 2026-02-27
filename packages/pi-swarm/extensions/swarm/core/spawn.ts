@@ -157,7 +157,7 @@ export function spawnAgent(
     agentFiles?: AgentFiles,
     swarmAgentNames?: string[],
     topicChannel?: string,
-): { process: ChildProcess; tmpDir?: string } {
+): { process: ChildProcess; tmpDir?: string; model?: string } {
     // Build swarm coordination prompt
     const coordinationPrompt = buildSystemPrompt({
         role: agentDef.role,
@@ -205,7 +205,7 @@ export function spawnAgent(
         cleanupTempFiles(resolved.tmpPromptPath, resolved.tmpDir);
     });
 
-    return { process: proc, tmpDir: resolved.tmpDir };
+    return { process: proc, tmpDir: resolved.tmpDir, model: resolved.model };
 }
 
 

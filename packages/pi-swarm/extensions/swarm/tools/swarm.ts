@@ -417,6 +417,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                     swarm: agentDef.swarm,
                     task: agentDef.task,
                     status: "starting",
+                    agentType: agentDef.agent,
                 });
             }
 
@@ -544,11 +545,12 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                 const agentInfo = agentMap.get(agentDef.name)!;
                 const agentFileInfo = scaffoldResult?.agentFiles.get(agentDef.name);
                 const agentTopicChannel = topicChannels.get(agentDef.swarm);
-                const { process: proc } = spawnAgent(
+                const { process: proc, model } = spawnAgent(
                     agentDef, group.path, taskDirPath, ctx.cwd, knownAgents, agentFileInfo, agentNames, agentTopicChannel,
                 );
 
                 agentInfo.process = proc;
+                agentInfo.model = model;
 
                 // Capture stderr for debugging
                 let stderr = "";
