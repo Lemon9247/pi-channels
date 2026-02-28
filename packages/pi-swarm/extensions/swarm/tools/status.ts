@@ -17,8 +17,6 @@ function statusIcon(status: string): string {
             return "🔄";
         case "running":
             return "⏳";
-        case "idle":
-            return "💤";
         case "done":
             return "✅";
         case "blocked":
@@ -49,7 +47,6 @@ export function registerStatusTool(pi: ExtensionAPI): void {
 
             const agents = Array.from(state.agents.values());
             const running = agents.filter((a) => a.status === "running" || a.status === "starting").length;
-            const idle = agents.filter((a) => a.status === "idle").length;
             const done = agents.filter((a) => a.status === "done").length;
             const blocked = agents.filter((a) => a.status === "blocked").length;
             const failed = agents.filter((a) => a.status === "crashed" || a.status === "disconnected").length;
@@ -57,7 +54,6 @@ export function registerStatusTool(pi: ExtensionAPI): void {
             let report = `## Swarm Status\n\n`;
             report += `**Total:** ${agents.length} agents | `;
             report += `Running: ${running}`;
-            if (idle > 0) report += ` | Idle: ${idle}`;
             report += ` | Done: ${done}`;
             if (blocked > 0) report += ` | Blocked: ${blocked}`;
             if (failed > 0) report += ` | Failed: ${failed}`;
@@ -110,7 +106,6 @@ export function registerStatusTool(pi: ExtensionAPI): void {
                 details: {
                     total: agents.length,
                     running,
-                    idle,
                     done,
                     blocked,
                     failed,
@@ -139,10 +134,9 @@ export function registerStatusTool(pi: ExtensionAPI): void {
                 return new Text(theme.fg("muted", text.text), 0, 0);
             }
 
-            const { total, running, idle, done, blocked, failed } = details;
+            const { total, running, done, blocked, failed } = details;
             let summary = theme.fg("toolTitle", theme.bold("swarm "));
             summary += theme.fg("accent", `${done}/${total} done`);
-            if (idle > 0) summary += theme.fg("muted", ` ${idle} idle`);
             if (running > 0) summary += theme.fg("warning", ` ${running} running`);
             if (blocked > 0) summary += theme.fg("error", ` ${blocked} blocked`);
             if (failed > 0) summary += theme.fg("error", ` ${failed} failed`);
