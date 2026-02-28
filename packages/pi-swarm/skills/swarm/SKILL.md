@@ -22,7 +22,7 @@ The `swarm` tool spawns agents as background processes connected via channels (U
 2. **Agents run in background** — you see live status in the widget and get notifications
 3. **Use `/hive`** for detailed agent activity, **`swarm_status`** for structured status
 4. **Use `swarm_instruct`** to send instructions to agents mid-swarm
-5. **When agents complete**, they go **idle** — re-task with new work or dismiss
+5. **When agents complete**, they call `hive_done` — you get a notification
 
 **Do NOT `bash sleep` to wait.** After launching, just stop — notifications arrive automatically. Stay available to chat with the user.
 
@@ -89,19 +89,9 @@ swarm({
 **Queen orchestrates (you):**
 - Spawn agents with rough scopes (areas, not file assignments)
 - Monitor and relay user intent via `swarm_instruct`
-- Re-task idle agents with follow-up work or dismiss when done
 - **Never read code** — spawn reviewer agents for quality checks
 
 **Quality gating:**
 - Spawn a reviewer agent to check implementation agents' work
 - Read the reviewer's structured summary (not code)
-- Decide pass/fail: if pass, dismiss or re-task; if fail, forward feedback via `swarm_instruct`
-
-## Re-Tasking Idle Agents
-
-When an agent calls `hive_done`, it goes **idle** — stays alive, keeps context, waits for instructions. You can:
-
-- **Re-task**: Send new work via `swarm_instruct("agent-name", "New task: ...")` — agent resumes with full prior context
-- **Dismiss**: Send `swarm_instruct("agent-name", "You are dismissed. Exit now.")` — agent exits
-
-Prefer re-tasking over spawning fresh agents when follow-up work is related. Dismiss agents you won't need again to free resources.
+- Decide pass/fail: if pass, move on; if fail, forward feedback via `swarm_instruct`

@@ -19,7 +19,7 @@ Agents self-coordinate via channels without waiting for pre-assignment from the 
 **Be plan-aware:**
 - If a plan file exists in the task directory (e.g., `plan.md`, `roadmap.md`) or is referenced in your task, **read it first** to understand the broader context, dependencies, and what comes next.
 - Use the plan to guide your work and to see what other agents might be tackling.
-- When idle, check the plan for unclaimed tasks and propose what you could handle next.
+
 
 **Use targeted messages:**
 - Use the `to` field on `message` when your finding is relevant to a specific agent, not everyone.

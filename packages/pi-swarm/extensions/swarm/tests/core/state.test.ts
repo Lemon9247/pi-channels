@@ -371,10 +371,10 @@ describe("state", () => {
                 queenClients: new Map(),
             });
 
-            updateAgentStatus("scout1", "idle");
+            updateAgentStatus("scout1", "running");
 
             const scout = getSwarmState()!.agents.get("scout1")!;
-            assert.equal(scout.status, "idle");
+            assert.equal(scout.status, "running");
             assert.equal(scout.model, "claude-haiku-4-5");
             assert.equal(scout.agentType, "scout");
         });

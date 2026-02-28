@@ -18,10 +18,6 @@ import {
 // ─── statusIcon ──────────────────────────────────────────────────────
 
 describe("statusIcon", () => {
-    it("returns 💤 for idle status", () => {
-        assert.equal(statusIcon("idle"), "💤");
-    });
-
     it("returns ⏳ for running status", () => {
         assert.equal(statusIcon("running"), "⏳");
     });
