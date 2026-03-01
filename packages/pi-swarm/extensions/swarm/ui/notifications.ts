@@ -12,7 +12,8 @@
  * Delivery rules:
  * - blocker → steer (interrupts after current tool)
  * - instruct → steer (direct intervention, interrupt and adjust)
- * - message → followUp (waits for current tool chain to finish)
+ * - message → batched followUp (queued, flushed after 50ms debounce)
+ * - message (urgent) → steer (bypasses batch, immediate delivery)
  * - done → no context injection (tracked in state only)
  * - relay → no context injection (handled by swarm tool)
  */
@@ -20,6 +21,72 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import type { ChannelClient, Message } from "agent-channels";
 import { getIdentity } from "../core/identity.js";
+
+// ─── Message Batching ────────────────────────────────────────────────
+
+/** Max messages in a single batch before truncation. */
+const MAX_BATCH_SIZE = 20;
+
+interface BatchEntry {
+    from: string;
+    content: string;
+    timestamp: number;
+}
+
+/** Module-level batch buffer. Exported for testing. */
+export const messageBatch: BatchEntry[] = [];
+
+/** Debounce delay for batch flush (ms). */
+const FLUSH_DELAY = 50;
+
+/** Debounced flush timer. */
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Clear the debounced flush timer (for testing). */
+export function clearFlushTimer(): void {
+    if (flushTimer) {
+        clearTimeout(flushTimer);
+        flushTimer = null;
+    }
+}
+
+/**
+ * Queue a message for batched delivery.
+ */
+function queueMessage(from: string, content: string): void {
+    messageBatch.push({ from, content, timestamp: Date.now() });
+}
+
+/**
+ * Flush all queued messages as a single coherent delivery.
+ * Single message: delivers normally without wrapper.
+ * Multiple messages: formats as a summary list.
+ * Truncates at MAX_BATCH_SIZE with overflow count.
+ */
+export function flushBatch(pi: ExtensionAPI): void {
+    if (messageBatch.length === 0) return;
+
+    const messages = messageBatch.splice(0);
+    let text: string;
+
+    if (messages.length === 1) {
+        text = `💬 **${messages[0].from}**: ${messages[0].content}`;
+    } else {
+        const shown = messages.slice(0, MAX_BATCH_SIZE);
+        const formatted = shown
+            .map((m) => `**${m.from}**: ${m.content}`)
+            .join("\n\n");
+        text = `💬 **${messages.length} messages while you were working:**\n\n${formatted}`;
+        if (messages.length > MAX_BATCH_SIZE) {
+            text += `\n\n...and ${messages.length - MAX_BATCH_SIZE} more messages`;
+        }
+    }
+
+    pi.sendMessage(
+        { customType: "swarm-message-batch", content: text, display: true },
+        { deliverAs: "followUp" },
+    );
+}
 
 /**
  * Check whether a message should be processed by this agent.
@@ -74,6 +141,7 @@ export function setupNotifications(pi: ExtensionAPI, clients: Map<string, Channe
 
             switch (type) {
                 case "blocker": {
+                    flushBatch(pi);
                     const description = (data.description as string) || msg.msg;
                     const text =
                         `⚠️ **Blocker from ${senderName}** (${senderRole}): ${description}\n\n` +
@@ -90,6 +158,7 @@ export function setupNotifications(pi: ExtensionAPI, clients: Map<string, Channe
                 }
 
                 case "instruct": {
+                    flushBatch(pi);
                     const instruction = (data.instruction as string) || msg.msg;
                     const from = (data.from as string) || "queen";
                     const text =
@@ -108,16 +177,29 @@ export function setupNotifications(pi: ExtensionAPI, clients: Map<string, Channe
 
                 case "message": {
                     const content = (data.content as string) || msg.msg;
-                    const text =
-                        `💬 **${senderName}** (${senderRole}): ${content}`;
-                    pi.sendMessage(
-                        {
-                            customType: "swarm-message",
-                            content: text,
-                            display: true,
-                        },
-                        { deliverAs: "followUp" },
-                    );
+                    const urgent = data.urgent as boolean | undefined;
+                    if (urgent) {
+                        // Urgent: bypass batch, deliver immediately as steer
+                        pi.sendMessage(
+                            {
+                                customType: "swarm-message-urgent",
+                                content: `🚨 **${senderName}** (urgent): ${content}`,
+                                display: true,
+                            },
+                            { deliverAs: "steer" },
+                        );
+                    } else {
+                        // Normal: queue for batched delivery
+                        queueMessage(senderName, content);
+                        // Debounced flush: messages arriving in quick succession
+                        // (typical during tool chains) accumulate before delivery
+                        if (!flushTimer) {
+                            flushTimer = setTimeout(() => {
+                                flushTimer = null;
+                                flushBatch(pi);
+                            }, FLUSH_DELAY);
+                        }
+                    }
                     break;
                 }
 

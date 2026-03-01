@@ -45,6 +45,30 @@ export class ChannelGroup {
     }
 
     /**
+     * Create a ChannelGroup pointing at an existing group directory.
+     *
+     * Does NOT create channels or start the group — it reads group.json to
+     * verify the directory is a valid group, then returns a ChannelGroup in
+     * 'started' state so that `addChannel()` and `removeChannel()` can be
+     * called on it.
+     *
+     * Use case: an agent with canSpawn wants to add sub-agent inboxes to
+     * the parent swarm's channel group without creating a new group.
+     */
+    static fromExisting(groupDir: string): ChannelGroup {
+        const metaPath = path.join(groupDir, "group.json");
+        if (!fs.existsSync(metaPath)) {
+            throw new Error(`Not a valid channel group: ${groupDir} (group.json not found)`);
+        }
+
+        // Read metadata to verify — we don't need to restore channels,
+        // just allow addChannel/removeChannel on the existing directory.
+        const group = new ChannelGroup({ path: groupDir, channels: [] });
+        group._started = true;
+        return group;
+    }
+
+    /**
      * Create the group directory, start all channel servers, then write
      * group.json metadata. group.json is written last so that any process
      * reading it can be confident all listed channels are already listening.

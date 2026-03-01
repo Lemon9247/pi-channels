@@ -73,6 +73,31 @@ export function formatTokens(count: number): string {
     return `${(count / 1000000).toFixed(1)}M`;
 }
 
+// ─── Model Names ─────────────────────────────────────────────────────
+
+/**
+ * Shorten model names for compact display.
+ * Strips "claude-" prefix and date suffix (YYYYMMDD).
+ *
+ * Examples:
+ * - claude-haiku-4-5-20250514 → haiku-4-5
+ * - claude-sonnet-4-5-20250514 → sonnet-4-5
+ * - claude-opus-4-5 → opus-4-5
+ * - unknown-model → unknown-model
+ */
+export function shortModelName(model: string | undefined): string | undefined {
+    if (model === undefined) return undefined;
+    if (model === "") return "";
+
+    // Strip leading "claude-"
+    let short = model.startsWith("claude-") ? model.slice(7) : model;
+
+    // Strip trailing date suffix (8 digits)
+    short = short.replace(/-\d{8}$/, "");
+
+    return short;
+}
+
 // ─── Usage Stats ─────────────────────────────────────────────────────
 
 export interface UsageStats {

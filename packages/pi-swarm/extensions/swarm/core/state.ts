@@ -8,12 +8,13 @@
 
 import type { ChildProcess } from "node:child_process";
 import type { ChannelGroup, ChannelClient } from "agent-channels";
+import type { Role } from "./identity.js";
 
 export type AgentStatus = "starting" | "running" | "done" | "blocked" | "disconnected" | "crashed";
 
 export interface AgentInfo {
     name: string;
-    role: "coordinator" | "agent";
+    role: Role;
     swarm: string;
     task: string;
     status: AgentStatus;
@@ -23,6 +24,10 @@ export interface AgentInfo {
     progressPhase?: string;
     progressPercent?: number;
     progressDetail?: string;
+    model?: string;
+    agentType?: string;
+    /** Name of the agent that spawned this one (for sub-agent tracking). */
+    spawnedBy?: string;
 }
 
 export interface MessageEntry {

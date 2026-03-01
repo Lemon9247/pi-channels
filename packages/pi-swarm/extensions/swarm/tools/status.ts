@@ -9,6 +9,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getSwarmState, type AgentInfo } from "../core/state.js";
+import { shortModelName } from "../ui/format.js";
 
 function statusIcon(status: string): string {
     switch (status) {
@@ -52,7 +53,8 @@ export function registerStatusTool(pi: ExtensionAPI): void {
 
             let report = `## Swarm Status\n\n`;
             report += `**Total:** ${agents.length} agents | `;
-            report += `Running: ${running} | Done: ${done}`;
+            report += `Running: ${running}`;
+            report += ` | Done: ${done}`;
             if (blocked > 0) report += ` | Blocked: ${blocked}`;
             if (failed > 0) report += ` | Failed: ${failed}`;
             report += "\n\n";
@@ -71,7 +73,20 @@ export function registerStatusTool(pi: ExtensionAPI): void {
             for (const [swarmName, swarmAgents] of bySwarm) {
                 report += `### ${swarmName}\n`;
                 for (const agent of swarmAgents) {
-                    report += `- ${statusIcon(agent.status)} **${agent.name}** (${agent.role}) — ${agent.status}`;
+                    // Display archetype + model instead of just role
+                    let roleDisplay: string;
+                    if (agent.agentType && agent.model) {
+                        roleDisplay = `${agent.agentType}/${shortModelName(agent.model)}`;
+                    } else if (agent.agentType) {
+                        roleDisplay = agent.agentType;
+                    } else if (agent.model) {
+                        const role = agent.role === "coordinator" ? "coordinator" : "agent";
+                        roleDisplay = `${role}/${shortModelName(agent.model)}`;
+                    } else {
+                        roleDisplay = agent.role;
+                    }
+
+                    report += `- ${statusIcon(agent.status)} **${agent.name}** (${roleDisplay}) — ${agent.status}`;
                     if (agent.doneSummary) report += `\n  Done: ${agent.doneSummary}`;
                     if (agent.blockerDescription) report += `\n  Blocked: ${agent.blockerDescription}`;
                     if (agent.progressPhase || agent.progressPercent != null || agent.progressDetail) {
@@ -99,6 +114,8 @@ export function registerStatusTool(pi: ExtensionAPI): void {
                         role: a.role,
                         swarm: a.swarm,
                         status: a.status,
+                        model: a.model,
+                        agentType: a.agentType,
                     })),
                 },
             };

@@ -5,10 +5,10 @@
  * Two modes based on environment:
  *
  * - No PI_CHANNELS_GROUP: Queen mode. Can create swarms (channel groups).
- * - PI_CHANNELS_GROUP set: Agent/coordinator mode. Connects as client.
+ * - PI_CHANNELS_GROUP set: Agent mode. Connects as client.
  *
- * The swarm tool is always registered (queen starts swarms, coordinators
- * spawn sub-agents within existing swarms).
+ * Spawn tools (swarm, instruct, status, kill) are registered for the queen
+ * and for agents with canSpawn=true.
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
@@ -17,6 +17,7 @@ import { connectToMultiple } from "./core/channels.js";
 import { registerSwarmTool } from "./tools/swarm.js";
 import { registerInstructTool } from "./tools/instruct.js";
 import { registerStatusTool } from "./tools/status.js";
+import { registerKillTool } from "./tools/kill.js";
 import { registerAgentTools } from "./tools/agent.js";
 import { setupNotifications } from "./ui/notifications.js";
 import { cleanupSwarm, setParentClients, getParentClients } from "./core/state.js";
@@ -113,11 +114,13 @@ export default function (pi: ExtensionAPI) {
         },
     });
 
-    // Register management tools — only queen and coordinator can spawn sub-agents.
-    if (identity.role === "queen" || identity.role === "coordinator") {
+    // Register management tools — queen always gets them, agents get them if canSpawn is true.
+    const canSpawn = identity.role === "queen" || process.env.PI_SWARM_CAN_SPAWN === "true";
+    if (canSpawn) {
         registerSwarmTool(pi);
         registerInstructTool(pi);
         registerStatusTool(pi);
+        registerKillTool(pi);
     }
 
     // Single shutdown handler with correct ordering:

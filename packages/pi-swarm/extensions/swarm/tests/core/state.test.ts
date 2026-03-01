@@ -29,6 +29,9 @@ function makeAgent(name: string, overrides?: Partial<AgentInfo>): AgentInfo {
         swarm: "test",
         task: "test task",
         status: "running",
+        model: undefined,
+        agentType: undefined,
+        spawnedBy: undefined,
         ...overrides,
     };
 }
@@ -305,6 +308,76 @@ describe("state", () => {
         it("is safe to call when no swarm exists", async () => {
             await cleanupSwarm(); // Should not throw
             assert.equal(getSwarmState(), null);
+        });
+    });
+
+    describe("model and agentType fields", () => {
+        it("can store model and agentType in AgentInfo", () => {
+            const agents = new Map<string, AgentInfo>();
+            agents.set("scout1", makeAgent("scout1", {
+                model: "claude-haiku-4-5-20250514",
+                agentType: "scout",
+            }));
+            agents.set("worker1", makeAgent("worker1", {
+                model: "claude-sonnet-4-5-20250514",
+                agentType: "worker",
+            }));
+
+            setSwarmState({
+                generation: 0,
+                group: null,
+                groupPath: "/tmp/test",
+                agents,
+                queenClients: new Map(),
+            });
+
+            const scout = getSwarmState()!.agents.get("scout1")!;
+            assert.equal(scout.model, "claude-haiku-4-5-20250514");
+            assert.equal(scout.agentType, "scout");
+
+            const worker = getSwarmState()!.agents.get("worker1")!;
+            assert.equal(worker.model, "claude-sonnet-4-5-20250514");
+            assert.equal(worker.agentType, "worker");
+        });
+
+        it("model and agentType are optional", () => {
+            const agents = new Map<string, AgentInfo>();
+            agents.set("a1", makeAgent("a1")); // No model/agentType
+
+            setSwarmState({
+                generation: 0,
+                group: null,
+                groupPath: "/tmp/test",
+                agents,
+                queenClients: new Map(),
+            });
+
+            const agent = getSwarmState()!.agents.get("a1")!;
+            assert.equal(agent.model, undefined);
+            assert.equal(agent.agentType, undefined);
+        });
+
+        it("preserves model and agentType through status updates", () => {
+            const agents = new Map<string, AgentInfo>();
+            agents.set("scout1", makeAgent("scout1", {
+                model: "claude-haiku-4-5",
+                agentType: "scout",
+            }));
+
+            setSwarmState({
+                generation: 0,
+                group: null,
+                groupPath: "/tmp/test",
+                agents,
+                queenClients: new Map(),
+            });
+
+            updateAgentStatus("scout1", "running");
+
+            const scout = getSwarmState()!.agents.get("scout1")!;
+            assert.equal(scout.status, "running");
+            assert.equal(scout.model, "claude-haiku-4-5");
+            assert.equal(scout.agentType, "scout");
         });
     });
 });

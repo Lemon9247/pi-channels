@@ -32,12 +32,14 @@ interface ConnectedClient {
  * - "error" (err: Error) — server or client error
  */
 export class Channel extends EventEmitter {
+    private static readonly MAX_QUEUE_SIZE = 1000;
     private readonly socketPath: string;
     private readonly echoToSender: boolean;
     private server: net.Server | null = null;
     private clients: Map<string, ConnectedClient> = new Map();
     private _started = false;
     private nextClientId = 0;
+    private messageQueue: Buffer[] = [];
 
     constructor(options: ChannelOptions) {
         super();
@@ -123,9 +125,22 @@ export class Channel extends EventEmitter {
     /**
      * Inject a message from the server side (broadcast to all clients).
      * No sender to exclude — everyone receives it.
+     *
+     * If no clients are connected, the message is queued and will be
+     * delivered to the first client that connects (solves the race
+     * condition where a channel is created but the agent hasn't
+     * connected yet).
      */
     broadcast(msg: Message): void {
         const frame = encode(msg);
+        if (this.clients.size === 0) {
+            // Cap queue to prevent unbounded growth if client never connects
+            if (this.messageQueue.length >= Channel.MAX_QUEUE_SIZE) {
+                this.messageQueue.shift();
+            }
+            this.messageQueue.push(frame);
+            return;
+        }
         // Snapshot to avoid map mutation during iteration (same as fanOut)
         const snapshot = Array.from(this.clients.values());
         for (const client of snapshot) {
@@ -140,6 +155,14 @@ export class Channel extends EventEmitter {
 
         this.clients.set(clientId, client);
         this.emit("connect", clientId);
+
+        // Flush queued messages to newly connected client
+        if (this.messageQueue.length > 0) {
+            for (const frame of this.messageQueue) {
+                this.writeToClient(client, frame);
+            }
+            this.messageQueue = [];
+        }
 
         socket.on("data", (chunk: Buffer) => {
             let messages: Message[];
@@ -172,13 +195,22 @@ export class Channel extends EventEmitter {
 
     private fanOut(msg: Message, senderId: string): void {
         const frame = encode(msg);
-        // Snapshot client list before iteration (W1 fix).
-        // writeToClient can trigger disconnectClient which modifies the map.
+        // Count eligible recipients (all except sender when echoToSender is off)
         const snapshot = Array.from(this.clients.values());
-        for (const client of snapshot) {
-            if (!this.echoToSender && client.id === senderId) {
-                continue;
+        const eligible = snapshot.filter(
+            (c) => this.echoToSender || c.id !== senderId,
+        );
+
+        if (eligible.length === 0) {
+            // Cap queue to prevent unbounded growth if client never connects
+            if (this.messageQueue.length >= Channel.MAX_QUEUE_SIZE) {
+                this.messageQueue.shift();
             }
+            this.messageQueue.push(frame);
+            return;
+        }
+
+        for (const client of eligible) {
             this.writeToClient(client, frame);
         }
     }

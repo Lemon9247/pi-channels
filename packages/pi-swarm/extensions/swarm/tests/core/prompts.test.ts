@@ -22,8 +22,7 @@ describe("prompt loader", () => {
     it("loads all role files", () => {
         const store = loadPrompts(PROMPTS_DIR);
         assert.ok(store.roles.has("agent"), "missing agent role");
-        assert.ok(store.roles.has("coordinator"), "missing coordinator role");
-        assert.equal(store.roles.size, 2);
+        assert.equal(store.roles.size, 1);
     });
 
     it("loads all tool files", () => {
@@ -107,35 +106,17 @@ describe("prompt builder", () => {
         assert.ok(!prompt.includes("{{"), "should have no unsubstituted variables");
     });
 
-    it("builds agent prompt without coordinator sections", () => {
+    it("builds prompt with all tool docs for any role", () => {
         const prompt = buildSystemPrompt({
             role: "agent",
             agentName: "agent a1",
             swarmAgents: ["agent a1"],
         });
 
-        assert.ok(!prompt.includes("# Team Lead"), "agent prompt should not include team lead role");
-        // Agent prompt should not include coordinator tool docs (## swarm_instruct heading)
-        // but may mention swarm_instruct in pattern files (agents receive instructions)
-        assert.ok(!prompt.includes("## swarm_instruct"), "agent prompt should not include swarm_instruct tool doc");
-        assert.ok(!prompt.includes("## swarm_status"), "agent prompt should not include swarm_status tool doc");
-    });
-
-    it("builds coordinator prompt with team lead sections", () => {
-        const prompt = buildSystemPrompt({
-            role: "coordinator",
-            agentName: "coord-alpha",
-            swarmAgents: ["coord-alpha", "agent a1"],
-        });
-
-        // Has team lead role content
-        assert.ok(prompt.includes("Team Lead"), "should include team lead role");
+        // All agents get all tool docs (spawn tools included for canSpawn agents)
         assert.ok(prompt.includes("swarm_instruct"), "should include swarm_instruct tool doc");
         assert.ok(prompt.includes("swarm_status"), "should include swarm_status tool doc");
-
-        // Still has agent base
-        assert.ok(prompt.includes("coord-alpha"), "should contain agent name");
-        assert.ok(prompt.includes("message"), "should include agent tool docs");
+        assert.ok(prompt.includes("message"), "should include message tool doc");
     });
 
     it("includes file paths when agentFiles provided", () => {
@@ -153,14 +134,14 @@ describe("prompt builder", () => {
         assert.ok(prompt.includes("/tmp/task/agent-a1-report.md"), "should contain report path");
     });
 
-    it("includes coordinator-specific file paths", () => {
+    it("includes optional file paths when provided", () => {
         const prompt = buildSystemPrompt({
-            role: "coordinator",
-            agentName: "coord-alpha",
-            swarmAgents: ["coord-alpha"],
+            role: "agent",
+            agentName: "agent a1",
+            swarmAgents: ["agent a1"],
             agentFiles: {
                 hiveMindPath: "/tmp/task/hive-mind.md",
-                reportPath: "/tmp/task/coord-alpha-report.md",
+                reportPath: "/tmp/task/agent-a1-report.md",
                 crossSwarmPath: "/tmp/task/cross-swarm.md",
                 synthesisPath: "/tmp/task/synthesis.md",
             },
@@ -252,14 +233,12 @@ describe("prompt builder", () => {
 
     it("does not reference old concepts", () => {
         const prompt = buildSystemPrompt({
-            role: "coordinator",
-            agentName: "coord-alpha",
-            swarmAgents: ["coord-alpha", "agent a1"],
+            role: "agent",
+            agentName: "agent a1",
+            swarmAgents: ["agent a1"],
             agentFiles: {
                 hiveMindPath: "/tmp/hive-mind.md",
                 reportPath: "/tmp/report.md",
-                crossSwarmPath: "/tmp/cross-swarm.md",
-                synthesisPath: "/tmp/synthesis.md",
             },
         });
 

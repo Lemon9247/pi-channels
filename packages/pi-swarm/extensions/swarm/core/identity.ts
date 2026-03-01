@@ -8,7 +8,7 @@
 
 import { ENV } from "./channels.js";
 
-export type Role = "queen" | "coordinator" | "agent";
+export type Role = "queen" | "agent";
 
 export interface Identity {
     name: string;

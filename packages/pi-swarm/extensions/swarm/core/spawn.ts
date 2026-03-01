@@ -30,10 +30,11 @@ export interface AgentDef {
     cwd?: string;
 }
 
-/** Swarm-specific agent definition — adds role and swarm assignment. */
+/** Swarm-specific agent definition — adds role, swarm assignment, and canSpawn. */
 export interface SwarmAgentDef extends AgentDef {
-    role: "agent" | "coordinator";
+    role: "agent";
     swarm: string;
+    canSpawn?: boolean;
 }
 
 // ─── Shared Arg Building ─────────────────────────────────────────────
@@ -157,7 +158,7 @@ export function spawnAgent(
     agentFiles?: AgentFiles,
     swarmAgentNames?: string[],
     topicChannel?: string,
-): { process: ChildProcess; tmpDir?: string } {
+): { process: ChildProcess; tmpDir?: string; model?: string } {
     // Build swarm coordination prompt
     const coordinationPrompt = buildSystemPrompt({
         role: agentDef.role,
@@ -187,8 +188,13 @@ export function spawnAgent(
         PI_SWARM_AGENT_SWARM: agentDef.swarm,
     };
 
-    // Pass task dir to coordinators
-    if (taskDirPath && agentDef.role === "coordinator") {
+    // Pass canSpawn flag so agent can register spawn tools
+    if (agentDef.canSpawn) {
+        env.PI_SWARM_CAN_SPAWN = "true";
+    }
+
+    // Pass task dir to canSpawn agents (so sub-swarm scaffolding can inherit it)
+    if (taskDirPath && agentDef.canSpawn) {
         env.PI_SWARM_TASK_DIR = taskDirPath;
     }
 
@@ -205,7 +211,7 @@ export function spawnAgent(
         cleanupTempFiles(resolved.tmpPromptPath, resolved.tmpDir);
     });
 
-    return { process: proc, tmpDir: resolved.tmpDir };
+    return { process: proc, tmpDir: resolved.tmpDir, model: resolved.model };
 }
 
 

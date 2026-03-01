@@ -94,6 +94,9 @@ ${overview || "(No overview provided)"}
 ## Agents
 ${agentList}
 
+## Sync Markers
+(Agents: write phase completion markers here. Other agents poll this section for coordination gates.)
+
 ## Findings
 (Agents: add your discoveries here. Be specific — file paths, line numbers, code snippets.)
 
@@ -272,46 +275,4 @@ export function scaffoldTaskDir(
             agentFiles,
         };
     }
-}
-
-/**
- * Scaffold a coordinator's subdirectory within an existing task dir.
- * Called when a coordinator invokes the swarm tool and has PI_SWARM_TASK_DIR set.
- * Creates swarm-<name>/ under the parent task dir with a flat structure.
- */
-export function scaffoldCoordinatorSubDir(
-    parentTaskDir: string,
-    swarmName: string,
-    overview: string | undefined,
-    agents: AgentInfo[],
-): ScaffoldResult {
-    const subDir = path.join(parentTaskDir, `swarm-${sanitizeName(swarmName)}`);
-    const hmPath = path.join(subDir, "hive-mind.md");
-    const csPath = path.join(parentTaskDir, "cross-swarm.md");
-    const synthPath = path.join(subDir, "synthesis.md");
-
-    // Ensure subdirectory exists
-    if (!fs.existsSync(subDir)) {
-        fs.mkdirSync(subDir, { recursive: true });
-    }
-
-    writeIfMissing(hmPath, hiveMindTemplate(overview, agents));
-    writeIfMissing(synthPath, synthesisTemplate(swarmName));
-
-    const agentFiles = new Map<string, AgentFiles>();
-    for (const agent of agents) {
-        const reportPath = path.join(subDir, `${sanitizeName(agent.name)}-report.md`);
-        agentFiles.set(agent.name, {
-            reportPath,
-            hiveMindPath: hmPath,
-        });
-    }
-
-    return {
-        taskDirPath: subDir,
-        isHierarchical: false,
-        hiveMindPath: hmPath,
-        crossSwarmPath: csPath,
-        agentFiles,
-    };
 }

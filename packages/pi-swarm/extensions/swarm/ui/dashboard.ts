@@ -8,7 +8,7 @@
 
 import { getSwarmState, type AgentInfo } from "../core/state.js";
 import { getAgentActivity, getAgentUsage, getAggregateUsage } from "./activity.js";
-import { formatTokens, statusIcon } from "./format.js";
+import { formatTokens, statusIcon, shortModelName } from "./format.js";
 import { isDashboardOpen } from "./overlay.js";
 
 // Store ctx reference for dashboard updates triggered outside tool execution
@@ -94,7 +94,19 @@ export function updateDashboard(ctx?: any): void {
             const isLast = i === swarmAgents.length - 1;
             const branch = isLast ? "└ " : "├ ";
             const icon = statusIcon(agent.status);
-            const role = agent.role === "coordinator" ? "co" : "ag";
+
+            // Display archetype + model instead of just role
+            let roleDisplay: string;
+            if (agent.agentType && agent.model) {
+                roleDisplay = `${agent.agentType}/${shortModelName(agent.model)}`;
+            } else if (agent.agentType) {
+                roleDisplay = agent.agentType;
+            } else if (agent.model) {
+                const role = agent.role === "coordinator" ? "co" : "ag";
+                roleDisplay = `${role}/${shortModelName(agent.model)}`;
+            } else {
+                roleDisplay = agent.role === "coordinator" ? "co" : "ag";
+            }
 
             // Compact usage: "3t ↑12k $0.02"
             const usage = getAgentUsage(agent.name);
@@ -136,7 +148,7 @@ export function updateDashboard(ctx?: any): void {
             }
 
             const usagePart = usageStr ? ` ${usageStr} ` : " ";
-            widgetLines.push(`   ${branch}${icon} ${agent.name} (${role})${usagePart}${detail}`);
+            widgetLines.push(`   ${branch}${icon} ${agent.name} (${roleDisplay})${usagePart}${detail}`);
         }
     }
 
