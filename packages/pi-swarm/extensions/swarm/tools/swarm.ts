@@ -35,7 +35,7 @@ import {
 import { getIdentity } from "../core/identity.js";
 import { scaffoldTaskDir, scaffoldCoordinatorSubDir, type ScaffoldResult } from "../core/scaffold.js";
 import { spawnAgent, type AgentDef } from "../core/spawn.js";
-import { discoverAgents, type AgentScope } from "../core/agents.js";
+import { discoverAgents, resolveCanSpawn, type AgentScope } from "../core/agents.js";
 import { updateDashboard, clearDashboard } from "../ui/dashboard.js";
 import { isDashboardOpen } from "../ui/overlay.js";
 import {
@@ -409,7 +409,17 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                 };
             }
 
+            // Resolve canSpawn for each agent
+            const agentCanSpawn = new Map<string, boolean>();
+            for (const agentDef of params.agents) {
+                agentCanSpawn.set(
+                    agentDef.name,
+                    resolveCanSpawn(agentDef.canSpawn, agentDef.agent, knownAgents),
+                );
+            }
+
             // Build agent info map
+            const spawnerName = getIdentity().name;
             const agentMap = new Map<string, AgentInfo>();
             for (const agentDef of params.agents) {
                 agentMap.set(agentDef.name, {
@@ -419,6 +429,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                     task: agentDef.task,
                     status: "starting",
                     agentType: agentDef.agent,
+                    spawnedBy: getIdentity().role === "queen" ? undefined : spawnerName,
                 });
             }
 
@@ -546,8 +557,12 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                 const agentInfo = agentMap.get(agentDef.name)!;
                 const agentFileInfo = scaffoldResult?.agentFiles.get(agentDef.name);
                 const agentTopicChannel = topicChannels.get(agentDef.swarm);
+                const spawnDef = {
+                    ...agentDef,
+                    canSpawn: agentCanSpawn.get(agentDef.name) || false,
+                };
                 const { process: proc, model } = spawnAgent(
-                    agentDef, group.path, taskDirPath, ctx.cwd, knownAgents, agentFileInfo, agentNames, agentTopicChannel,
+                    spawnDef, group.path, taskDirPath, ctx.cwd, knownAgents, agentFileInfo, agentNames, agentTopicChannel,
                 );
 
                 agentInfo.process = proc;

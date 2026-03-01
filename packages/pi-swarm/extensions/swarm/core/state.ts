@@ -25,6 +25,8 @@ export interface AgentInfo {
     progressDetail?: string;
     model?: string;
     agentType?: string;
+    /** Name of the agent that spawned this one (for sub-agent tracking). */
+    spawnedBy?: string;
 }
 
 export interface MessageEntry {
