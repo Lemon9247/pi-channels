@@ -17,6 +17,7 @@ import { connectToMultiple } from "./core/channels.js";
 import { registerSwarmTool } from "./tools/swarm.js";
 import { registerInstructTool } from "./tools/instruct.js";
 import { registerStatusTool } from "./tools/status.js";
+import { registerKillTool } from "./tools/kill.js";
 import { registerAgentTools } from "./tools/agent.js";
 import { setupNotifications } from "./ui/notifications.js";
 import { cleanupSwarm, setParentClients, getParentClients } from "./core/state.js";
@@ -119,6 +120,7 @@ export default function (pi: ExtensionAPI) {
         registerSwarmTool(pi);
         registerInstructTool(pi);
         registerStatusTool(pi);
+        registerKillTool(pi);
     }
 
     // Single shutdown handler with correct ordering:
