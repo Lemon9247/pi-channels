@@ -336,3 +336,169 @@ describe("ChannelGroup", () => {
         assert.equal(group.path, groupPath);
     });
 });
+
+describe("ChannelGroup.fromExisting", () => {
+    it("returns a group pointing at an existing directory", async () => {
+        const groupPath = tmpGroupPath();
+        const original = track(new ChannelGroup({
+            path: groupPath,
+            channels: [{ name: "general" }],
+        }));
+        await original.start();
+
+        const existing = ChannelGroup.fromExisting(groupPath);
+        assert.ok(existing.started);
+        assert.equal(existing.path, groupPath);
+
+        await original.stop({ removeDir: true });
+    });
+
+    it("throws if directory has no group.json", () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "no-group-"));
+        assert.throws(
+            () => ChannelGroup.fromExisting(dir),
+            /Not a valid channel group/,
+        );
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    it("allows addChannel on existing group", async () => {
+        const groupPath = tmpGroupPath();
+        const original = track(new ChannelGroup({
+            path: groupPath,
+            channels: [{ name: "general" }],
+        }));
+        await original.start();
+
+        const existing = ChannelGroup.fromExisting(groupPath);
+        const newChannel = await existing.addChannel({ name: "inbox-sub" });
+        assert.ok(newChannel.started);
+
+        // Verify client can connect to the new channel
+        const client = track(new ChannelClient(path.join(groupPath, "inbox-sub.sock")));
+        await client.connect();
+        assert.ok(client.connected);
+
+        client.disconnect();
+        await newChannel.stop();
+        await original.stop({ removeDir: true });
+    });
+});
+
+describe("Message queuing", () => {
+    it("queues broadcast messages when no clients connected", async () => {
+        const groupPath = tmpGroupPath();
+        const group = track(new ChannelGroup({
+            path: groupPath,
+            channels: [{ name: "inbox" }],
+        }));
+        await group.start();
+
+        // Broadcast before any client connects
+        const ch = group.channel("inbox");
+        ch.broadcast({ msg: "queued-msg-1", data: { value: 1 } });
+        ch.broadcast({ msg: "queued-msg-2", data: { value: 2 } });
+
+        // Now connect a client — should receive both queued messages
+        const client = track(new ChannelClient(path.join(groupPath, "inbox.sock")));
+        const received: Message[] = [];
+        client.on("message", (msg: Message) => received.push(msg));
+        await client.connect();
+
+        await new Promise((r) => setTimeout(r, 100));
+
+        assert.equal(received.length, 2);
+        assert.equal(received[0]!.msg, "queued-msg-1");
+        assert.equal(received[1]!.msg, "queued-msg-2");
+
+        client.disconnect();
+        await group.stop({ removeDir: true });
+    });
+
+    it("delivers messages normally when clients are connected", async () => {
+        const groupPath = tmpGroupPath();
+        const group = track(new ChannelGroup({
+            path: groupPath,
+            channels: [{ name: "general" }],
+        }));
+        await group.start();
+
+        const client = track(new ChannelClient(path.join(groupPath, "general.sock")));
+        const received: Message[] = [];
+        client.on("message", (msg: Message) => received.push(msg));
+        await client.connect();
+
+        // Broadcast with client already connected
+        const ch = group.channel("general");
+        ch.broadcast({ msg: "live-msg" });
+        await new Promise((r) => setTimeout(r, 50));
+
+        assert.equal(received.length, 1);
+        assert.equal(received[0]!.msg, "live-msg");
+
+        client.disconnect();
+        await group.stop({ removeDir: true });
+    });
+
+    it("queues fanOut messages when only sender is connected", async () => {
+        const groupPath = tmpGroupPath();
+        const group = track(new ChannelGroup({
+            path: groupPath,
+            channels: [{ name: "general" }],
+        }));
+        await group.start();
+
+        // Connect one client — it sends a message but there are no other clients
+        const sender = track(new ChannelClient(path.join(groupPath, "general.sock")));
+        await sender.connect();
+        sender.send({ msg: "orphan-msg" });
+        await new Promise((r) => setTimeout(r, 50));
+
+        // Now connect a second client — should receive the queued message
+        const receiver = track(new ChannelClient(path.join(groupPath, "general.sock")));
+        const received: Message[] = [];
+        receiver.on("message", (msg: Message) => received.push(msg));
+        await receiver.connect();
+        await new Promise((r) => setTimeout(r, 100));
+
+        assert.equal(received.length, 1);
+        assert.equal(received[0]!.msg, "orphan-msg");
+
+        sender.disconnect();
+        receiver.disconnect();
+        await group.stop({ removeDir: true });
+    });
+
+    it("does not re-deliver queued messages to second client", async () => {
+        const groupPath = tmpGroupPath();
+        const group = track(new ChannelGroup({
+            path: groupPath,
+            channels: [{ name: "inbox" }],
+        }));
+        await group.start();
+
+        // Queue a message
+        const ch = group.channel("inbox");
+        ch.broadcast({ msg: "once-only" });
+
+        // First client gets it
+        const client1 = track(new ChannelClient(path.join(groupPath, "inbox.sock")));
+        const received1: Message[] = [];
+        client1.on("message", (msg: Message) => received1.push(msg));
+        await client1.connect();
+        await new Promise((r) => setTimeout(r, 50));
+        assert.equal(received1.length, 1);
+
+        // Second client should NOT get the queued message (already drained)
+        const client2 = track(new ChannelClient(path.join(groupPath, "inbox.sock")));
+        const received2: Message[] = [];
+        client2.on("message", (msg: Message) => received2.push(msg));
+        await client2.connect();
+        await new Promise((r) => setTimeout(r, 50));
+        assert.equal(received2.length, 0);
+
+        client1.disconnect();
+        client2.disconnect();
+        await group.stop({ removeDir: true });
+    });
+});
