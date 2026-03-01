@@ -129,6 +129,20 @@ function handleQueenMessage(
             if (updateAgentStatus(senderName, "done", { doneSummary: summary })) {
                 state.onAgentDone?.(senderName, summary);
                 updateDashboard(ctx);
+
+                // Kill the agent process — it's completed its work.
+                // Brief delay lets any in-flight I/O (socket writes, file flushes) complete.
+                const agent = state.agents.get(senderName);
+                if (agent?.process?.pid && !agent.process.killed) {
+                    const pid = agent.process.pid;
+                    setTimeout(() => {
+                        try {
+                            process.kill(-pid, "SIGTERM");
+                        } catch {
+                            try { agent.process!.kill("SIGTERM"); } catch { /* ignore */ }
+                        }
+                    }, 1000);
+                }
             }
             break;
         }
