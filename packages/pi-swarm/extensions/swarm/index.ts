@@ -5,10 +5,10 @@
  * Two modes based on environment:
  *
  * - No PI_CHANNELS_GROUP: Queen mode. Can create swarms (channel groups).
- * - PI_CHANNELS_GROUP set: Agent/coordinator mode. Connects as client.
+ * - PI_CHANNELS_GROUP set: Agent mode. Connects as client.
  *
- * The swarm tool is always registered (queen starts swarms, coordinators
- * spawn sub-agents within existing swarms).
+ * Spawn tools (swarm, instruct, status, kill) are registered for the queen
+ * and for agents with canSpawn=true.
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";

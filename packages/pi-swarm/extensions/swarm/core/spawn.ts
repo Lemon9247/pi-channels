@@ -193,8 +193,8 @@ export function spawnAgent(
         env.PI_SWARM_CAN_SPAWN = "true";
     }
 
-    // Pass task dir to coordinators and canSpawn agents
-    if (taskDirPath && (agentDef.role === "coordinator" || agentDef.canSpawn)) {
+    // Pass task dir to canSpawn agents (so sub-swarm scaffolding can inherit it)
+    if (taskDirPath && agentDef.canSpawn) {
         env.PI_SWARM_TASK_DIR = taskDirPath;
     }
 

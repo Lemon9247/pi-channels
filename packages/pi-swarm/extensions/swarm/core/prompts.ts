@@ -2,11 +2,11 @@
  * Prompt Loader & Builder
  *
  * Loads prompt templates from markdown files and assembles them
- * into system prompts for swarm agents and coordinators.
+ * into system prompts for swarm agents.
  *
  * Directory structure:
  *   prompts/
- *   ├── roles/        agent.md, coordinator.md
+ *   ├── roles/        agent.md
  *   ├── tools/        message.md, hive-done.md, etc.
  *   └── patterns/     channels.md, coordination.md, etc.
  *
@@ -14,7 +14,6 @@
  *   {{agentName}}        — agent display name
  *   {{channels}}         — generated channel list
  *   {{files}}            — generated file paths section
- *   {{coordinatorFiles}} — cross-swarm + synthesis paths (coordinator only)
  */
 
 import * as fs from "node:fs";
@@ -144,20 +143,6 @@ function generateFileSection(agentFiles?: AgentFiles): string {
     return lines.join("\n");
 }
 
-/**
- * Generate coordinator-specific file paths section.
- */
-function generateCoordinatorFiles(agentFiles?: AgentFiles): string {
-    const lines: string[] = [];
-    if (agentFiles?.crossSwarmPath) {
-        lines.push(`**Cross-swarm findings**: Write discoveries that affect other swarms to: \`${agentFiles.crossSwarmPath}\``);
-    }
-    if (agentFiles?.synthesisPath) {
-        lines.push(`**Synthesis**: After all your agents complete, write a synthesis of their reports to: \`${agentFiles.synthesisPath}\``);
-    }
-    return lines.join("\n\n");
-}
-
 // ─── Template Substitution ───────────────────────────────────────────
 
 /**
@@ -173,16 +158,15 @@ function substitute(template: string, vars: Record<string, string>): string {
 
 /** Tool doc names for each role. */
 const AGENT_TOOLS = ["message", "hive-done", "hive-blocker"];
-const COORDINATOR_TOOLS = [...AGENT_TOOLS, "swarm-instruct", "swarm-status"];
+const SPAWN_TOOLS = ["swarm-instruct", "swarm-status"];
 
 /**
- * Build a complete system prompt for a swarm agent or coordinator.
+ * Build a complete system prompt for a swarm agent.
  *
  * Assembly order:
- * 1. Role template (agent.md, always)
- * 2. Coordinator template (coordinator.md, if coordinator)
- * 3. Tool documentation (based on role)
- * 4. Pattern files (all, always)
+ * 1. Role template (agent.md)
+ * 2. Tool documentation (all tools — agents with canSpawn get spawn tools)
+ * 3. Pattern files (all)
  *
  * Template variables are substituted in each section.
  */
@@ -194,7 +178,6 @@ export function buildSystemPrompt(options: PromptOptions): string {
         agentName,
         channels: generateChannelList(agentName, swarmAgents, topicChannel),
         files: generateFileSection(agentFiles),
-        coordinatorFiles: generateCoordinatorFiles(agentFiles),
     };
 
     const sections: string[] = [];
@@ -205,16 +188,8 @@ export function buildSystemPrompt(options: PromptOptions): string {
         sections.push(substitute(agentRole, vars));
     }
 
-    // 2. Coordinator role (if applicable)
-    if (role === "coordinator") {
-        const coordRole = store.roles.get("coordinator");
-        if (coordRole) {
-            sections.push(substitute(coordRole, vars));
-        }
-    }
-
-    // 3. Tool documentation
-    const toolNames = role === "coordinator" ? COORDINATOR_TOOLS : AGENT_TOOLS;
+    // 2. Tool documentation — agents with canSpawn get spawn tool docs too
+    const toolNames = [...AGENT_TOOLS, ...SPAWN_TOOLS];
     const toolSections: string[] = [];
     for (const toolName of toolNames) {
         const doc = store.tools.get(toolName);

@@ -19,7 +19,6 @@ import {
     GENERAL_CHANNEL,
     QUEEN_INBOX,
     inboxName,
-    topicName,
 } from "../core/channels.js";
 import {
     type AgentInfo,
@@ -29,11 +28,10 @@ import {
     setSwarmState,
     updateAgentStatus,
     cleanupSwarm,
-    getParentClients,
     pushMessage,
 } from "../core/state.js";
 import { getIdentity } from "../core/identity.js";
-import { scaffoldTaskDir, scaffoldCoordinatorSubDir, type ScaffoldResult } from "../core/scaffold.js";
+import { scaffoldTaskDir, type ScaffoldResult } from "../core/scaffold.js";
 import { spawnAgent, type AgentDef } from "../core/spawn.js";
 import { discoverAgents, resolveCanSpawn, type AgentScope } from "../core/agents.js";
 import { updateDashboard, clearDashboard } from "../ui/dashboard.js";
@@ -91,116 +89,6 @@ interface ToolContext {
 }
 
 /**
- * Relay an event up to the parent swarm (coordinator → queen).
- * No-op if we're not a coordinator (no parent clients).
- */
-function relayToParent(
-    event: string,
-    name: string,
-    agent: AgentInfo | undefined,
-    extra?: Record<string, unknown>,
-): void {
-    const clients = getParentClients();
-    if (!clients) return;
-    const queenClient = clients.get(QUEEN_INBOX);
-    if (!queenClient?.connected) return;
-    try {
-        queenClient.send({
-            msg: `relay: ${event}`,
-            data: {
-                type: "relay",
-                relay: {
-                    event,
-                    name,
-                    role: agent?.role || "agent",
-                    swarm: agent?.swarm || "unknown",
-                    ...extra,
-                },
-            },
-        });
-    } catch { /* ignore */ }
-}
-
-/**
- * Handle a relay event that a coordinator forwarded from a sub-agent.
- * Adds/updates the sub-agent in the queen's state for the dashboard.
- */
-function handleRelayEvent(
-    state: SwarmState,
-    relay: Record<string, unknown>,
-    ctx: ToolContext,
-): void {
-    const name = relay.name as string;
-    const event = relay.event as string;
-    const role = (relay.role as string) || "agent";
-    const swarm = (relay.swarm as string) || "unknown";
-    const existing = state.agents.get(name);
-
-    if (event === "register") {
-        if (!existing) {
-            state.agents.set(name, {
-                name,
-                role,
-                swarm,
-                task: "(sub-agent)",
-                status: "running",
-            });
-        }
-        pushSyntheticEvent(name, "message", `registered (${role}, ${swarm})`);
-    } else if (event === "done") {
-        const summary = relay.summary as string | undefined;
-        if (existing) {
-            updateAgentStatus(name, "done", { doneSummary: summary });
-        } else {
-            state.agents.set(name, {
-                name,
-                role,
-                swarm,
-                task: "(sub-agent)",
-                status: "done",
-                doneSummary: summary,
-            });
-        }
-        pushSyntheticEvent(name, "tool_end", `✓ done: ${summary || "completed"}`);
-    } else if (event === "blocked") {
-        const description = relay.description as string | undefined;
-        if (existing) {
-            updateAgentStatus(name, "blocked", { blockerDescription: description });
-        } else {
-            state.agents.set(name, {
-                name,
-                role,
-                swarm,
-                task: "(sub-agent)",
-                status: "blocked",
-                blockerDescription: description,
-            });
-        }
-        pushSyntheticEvent(name, "tool_end", `⚠ blocked: ${description || "unknown"}`);
-    } else if (event === "disconnected") {
-        if (existing) {
-            updateAgentStatus(name, "disconnected");
-        }
-        pushSyntheticEvent(name, "message", "disconnected");
-    } else if (event === "message") {
-        pushSyntheticEvent(name, "message", `${relay.content || ""}`);
-    }
-
-    updateDashboard(ctx);
-
-    // Passthrough: if we have parent channels, forward the relay up
-    const parentClients = getParentClients();
-    if (parentClients) {
-        const queenInbox = parentClients.get(QUEEN_INBOX);
-        if (queenInbox?.connected) {
-            try {
-                queenInbox.send({ msg: `relay: ${name} ${event}`, data: { type: "relay", relay } });
-            } catch { /* ignore */ }
-        }
-    }
-}
-
-/**
  * Handle an incoming channel message from the queen's perspective.
  * Parses data.type to dispatch to appropriate handler.
  */
@@ -241,7 +129,6 @@ function handleQueenMessage(
             if (updateAgentStatus(senderName, "done", { doneSummary: summary })) {
                 state.onAgentDone?.(senderName, summary);
                 updateDashboard(ctx);
-                relayToParent("done", senderName, agentMap.get(senderName), { summary });
             }
             break;
         }
@@ -251,7 +138,6 @@ function handleQueenMessage(
             if (updateAgentStatus(senderName, "blocked", { blockerDescription: description })) {
                 state.onBlocker?.(senderName, description);
                 updateDashboard(ctx);
-                relayToParent("blocked", senderName, agentMap.get(senderName), { description });
             }
             break;
         }
@@ -278,17 +164,10 @@ function handleQueenMessage(
             pushSyntheticEvent(senderName, "message", content);
             state.onMessage?.(content, senderName);
             updateDashboard(ctx);
-            relayToParent("message", senderName, agentMap.get(senderName), { content });
             break;
         }
 
-        case "relay": {
-            const relay = msg.data.relay as Record<string, unknown>;
-            if (relay) {
-                handleRelayEvent(state, relay, ctx);
-            }
-            break;
-        }
+        // No relay case — flat architecture means queen sees all events directly
     }
 }
 
@@ -446,14 +325,13 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                     Array.from(agentMap.values()),
                 );
             } else if (parentTaskDir) {
-                const mySwarm = getIdentity().swarm || "default";
-                scaffoldResult = scaffoldCoordinatorSubDir(
-                    parentTaskDir,
-                    mySwarm,
+                // Inherit parent task dir for sub-swarm scaffolding
+                taskDirPath = parentTaskDir;
+                scaffoldResult = scaffoldTaskDir(
+                    taskDirPath,
                     undefined,
                     Array.from(agentMap.values()),
                 );
-                taskDirPath = scaffoldResult.taskDirPath;
             }
 
             // Connect queen to all channels for monitoring
