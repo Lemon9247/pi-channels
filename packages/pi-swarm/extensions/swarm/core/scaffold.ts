@@ -94,6 +94,9 @@ ${overview || "(No overview provided)"}
 ## Agents
 ${agentList}
 
+## Sync Markers
+(Agents: write phase completion markers here. Other agents poll this section for coordination gates.)
+
 ## Findings
 (Agents: add your discoveries here. Be specific — file paths, line numbers, code snippets.)
 
