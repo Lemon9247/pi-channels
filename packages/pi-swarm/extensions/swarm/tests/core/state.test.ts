@@ -31,6 +31,7 @@ function makeAgent(name: string, overrides?: Partial<AgentInfo>): AgentInfo {
         status: "running",
         model: undefined,
         agentType: undefined,
+        spawnedBy: undefined,
         ...overrides,
     };
 }

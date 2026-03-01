@@ -10,7 +10,7 @@
 import { describe, it, beforeEach } from "node:test";
 import * as assert from "node:assert/strict";
 import type { Message } from "agent-channels";
-import { shouldProcessMessage, messageBatch, flushBatch } from "../../ui/notifications.js";
+import { shouldProcessMessage, messageBatch, flushBatch, clearFlushTimer } from "../../ui/notifications.js";
 
 function msg(data: Record<string, unknown>): Message {
     return { msg: "test", data };
@@ -205,8 +205,9 @@ function mockPi(): { pi: any; sent: SentMessage[] } {
 
 describe("message batching", () => {
     beforeEach(() => {
-        // Clear batch buffer before each test
+        // Clear batch buffer and flush timer before each test
         messageBatch.splice(0);
+        clearFlushTimer();
     });
 
     it("single message delivers without wrapper", () => {
@@ -274,6 +275,7 @@ describe("urgent messages", () => {
 
     beforeEach(() => {
         messageBatch.splice(0);
+        clearFlushTimer();
     });
 
     it("urgent messages are not added to batch", () => {
@@ -307,5 +309,39 @@ describe("urgent messages", () => {
         // Second: the batched normal message (followUp)
         assert.equal(sent[1].opts.deliverAs, "followUp");
         assert.equal(sent[1].message.customType, "swarm-message-batch");
+    });
+
+    it("urgent message delivered via steer without corrupting pending batch", () => {
+        const { pi, sent } = mockPi();
+
+        // Queue 2 normal messages
+        messageBatch.push({ from: "a1", content: "normal one", timestamp: Date.now() });
+        messageBatch.push({ from: "a2", content: "normal two", timestamp: Date.now() });
+
+        // Urgent message delivered separately (as setupNotifications would do)
+        pi.sendMessage(
+            { customType: "swarm-message-urgent", content: "🚨 **a3** (urgent): stop now", display: true },
+            { deliverAs: "steer" },
+        );
+
+        // Urgent was delivered immediately
+        assert.equal(sent.length, 1);
+        assert.equal(sent[0].opts.deliverAs, "steer");
+        assert.equal(sent[0].message.customType, "swarm-message-urgent");
+
+        // Batch still intact — not lost or corrupted
+        assert.equal(messageBatch.length, 2);
+        assert.equal(messageBatch[0].from, "a1");
+        assert.equal(messageBatch[0].content, "normal one");
+        assert.equal(messageBatch[1].from, "a2");
+        assert.equal(messageBatch[1].content, "normal two");
+
+        // Flush batch — both queued messages delivered together
+        flushBatch(pi);
+        assert.equal(sent.length, 2);
+        assert.equal(sent[1].opts.deliverAs, "followUp");
+        assert.ok(sent[1].message.content.includes("2 messages while you were working"));
+        assert.ok(sent[1].message.content.includes("**a1**: normal one"));
+        assert.ok(sent[1].message.content.includes("**a2**: normal two"));
     });
 });

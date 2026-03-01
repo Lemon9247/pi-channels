@@ -276,5 +276,3 @@ export function scaffoldTaskDir(
         };
     }
 }
-
-// scaffoldCoordinatorSubDir removed — flat architecture uses scaffoldTaskDir directly

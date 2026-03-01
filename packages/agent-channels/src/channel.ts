@@ -32,6 +32,7 @@ interface ConnectedClient {
  * - "error" (err: Error) — server or client error
  */
 export class Channel extends EventEmitter {
+    private static readonly MAX_QUEUE_SIZE = 1000;
     private readonly socketPath: string;
     private readonly echoToSender: boolean;
     private server: net.Server | null = null;
@@ -133,6 +134,10 @@ export class Channel extends EventEmitter {
     broadcast(msg: Message): void {
         const frame = encode(msg);
         if (this.clients.size === 0) {
+            // Cap queue to prevent unbounded growth if client never connects
+            if (this.messageQueue.length >= Channel.MAX_QUEUE_SIZE) {
+                this.messageQueue.shift();
+            }
             this.messageQueue.push(frame);
             return;
         }
@@ -197,7 +202,10 @@ export class Channel extends EventEmitter {
         );
 
         if (eligible.length === 0) {
-            // No recipients — queue for future clients
+            // Cap queue to prevent unbounded growth if client never connects
+            if (this.messageQueue.length >= Channel.MAX_QUEUE_SIZE) {
+                this.messageQueue.shift();
+            }
             this.messageQueue.push(frame);
             return;
         }

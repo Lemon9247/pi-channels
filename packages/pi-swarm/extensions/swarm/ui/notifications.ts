@@ -12,7 +12,7 @@
  * Delivery rules:
  * - blocker → steer (interrupts after current tool)
  * - instruct → steer (direct intervention, interrupt and adjust)
- * - message → batched followUp (queued, flushed on next message arrival)
+ * - message → batched followUp (queued, flushed after 50ms debounce)
  * - message (urgent) → steer (bypasses batch, immediate delivery)
  * - done → no context injection (tracked in state only)
  * - relay → no context injection (handled by swarm tool)
@@ -35,6 +35,20 @@ interface BatchEntry {
 
 /** Module-level batch buffer. Exported for testing. */
 export const messageBatch: BatchEntry[] = [];
+
+/** Debounce delay for batch flush (ms). */
+const FLUSH_DELAY = 50;
+
+/** Debounced flush timer. */
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Clear the debounced flush timer (for testing). */
+export function clearFlushTimer(): void {
+    if (flushTimer) {
+        clearTimeout(flushTimer);
+        flushTimer = null;
+    }
+}
 
 /**
  * Queue a message for batched delivery.
@@ -119,11 +133,6 @@ export function setupNotifications(pi: ExtensionAPI, clients: Map<string, Channe
         client.on("message", (msg: Message) => {
             if (!shouldProcessMessage(msg, myName, mySwarm)) return;
 
-            // Flush any batched messages before processing the next one.
-            // This provides natural batching: messages queue during a tool chain,
-            // then flush when the next message arrives after the chain completes.
-            flushBatch(pi);
-
             // Safe to assert — shouldProcessMessage checks data/type exist
             const data = msg.data!;
             const type = data.type as string;
@@ -132,6 +141,7 @@ export function setupNotifications(pi: ExtensionAPI, clients: Map<string, Channe
 
             switch (type) {
                 case "blocker": {
+                    flushBatch(pi);
                     const description = (data.description as string) || msg.msg;
                     const text =
                         `⚠️ **Blocker from ${senderName}** (${senderRole}): ${description}\n\n` +
@@ -148,6 +158,7 @@ export function setupNotifications(pi: ExtensionAPI, clients: Map<string, Channe
                 }
 
                 case "instruct": {
+                    flushBatch(pi);
                     const instruction = (data.instruction as string) || msg.msg;
                     const from = (data.from as string) || "queen";
                     const text =
@@ -180,6 +191,14 @@ export function setupNotifications(pi: ExtensionAPI, clients: Map<string, Channe
                     } else {
                         // Normal: queue for batched delivery
                         queueMessage(senderName, content);
+                        // Debounced flush: messages arriving in quick succession
+                        // (typical during tool chains) accumulate before delivery
+                        if (!flushTimer) {
+                            flushTimer = setTimeout(() => {
+                                flushTimer = null;
+                                flushBatch(pi);
+                            }, FLUSH_DELAY);
+                        }
                     }
                     break;
                 }

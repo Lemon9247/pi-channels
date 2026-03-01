@@ -43,7 +43,7 @@ import {
 // Agent definition for async swarm mode — requires role and swarm assignment
 const SwarmAgentSchema = Type.Object({
     name: Type.String({ description: "Unique agent name (e.g. 'agent a1')" }),
-    role: Type.Union([Type.Literal("coordinator"), Type.Literal("agent")], {
+    role: Type.Literal("agent", {
         description: "Role in the swarm hierarchy",
     }),
     swarm: Type.String({ description: "Swarm this agent belongs to" }),

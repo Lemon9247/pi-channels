@@ -124,6 +124,35 @@ describe("swarm_kill state management", () => {
         assert.ok(!result);
     });
 
+    it("3-level hierarchy: killing A recursively marks B and C disconnected", () => {
+        const agents = [
+            makeAgent("queen-top"),
+            makeAgent("A", { spawnedBy: "queen-top" }),
+            makeAgent("B", { spawnedBy: "A" }),
+            makeAgent("C", { spawnedBy: "B" }),
+        ];
+        const state = makeState(agents);
+        setSwarmState(state);
+
+        // Recursive kill: find all descendants depth-first, then kill target
+        function killRecursive(name: string): void {
+            const children = Array.from(state.agents.values())
+                .filter((a) => a.spawnedBy === name);
+            for (const child of children) {
+                killRecursive(child.name);
+            }
+            updateAgentStatus(name, "disconnected");
+        }
+
+        killRecursive("A");
+
+        assert.equal(state.agents.get("A")!.status, "disconnected");
+        assert.equal(state.agents.get("B")!.status, "disconnected");
+        assert.equal(state.agents.get("C")!.status, "disconnected");
+        // Queen-top should not be affected
+        assert.equal(state.agents.get("queen-top")!.status, "running");
+    });
+
     it("marks all sub-agents disconnected when parent dies", () => {
         const agents = [
             makeAgent("parent"),

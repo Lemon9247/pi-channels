@@ -32,7 +32,7 @@ export interface AgentDef {
 
 /** Swarm-specific agent definition — adds role, swarm assignment, and canSpawn. */
 export interface SwarmAgentDef extends AgentDef {
-    role: string;
+    role: "agent";
     swarm: string;
     canSpawn?: boolean;
 }

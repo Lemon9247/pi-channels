@@ -20,6 +20,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AgentFiles } from "./scaffold.js";
+import type { Role } from "./identity.js";
 import { inboxName, GENERAL_CHANNEL, QUEEN_INBOX } from "./channels.js";
 
 // ─── Types ───────────────────────────────────────────────────────────
@@ -31,7 +32,7 @@ export interface PromptStore {
 }
 
 export interface PromptOptions {
-    role: string;
+    role: Role;
     agentName: string;
     swarmAgents: string[];       // all agent names in the swarm
     agentFiles?: AgentFiles;
