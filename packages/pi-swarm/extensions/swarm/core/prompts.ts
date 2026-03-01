@@ -32,7 +32,7 @@ export interface PromptStore {
 }
 
 export interface PromptOptions {
-    role: "agent" | "coordinator";
+    role: string;
     agentName: string;
     swarmAgents: string[];       // all agent names in the swarm
     agentFiles?: AgentFiles;

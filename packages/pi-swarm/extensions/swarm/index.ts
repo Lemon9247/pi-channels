@@ -113,8 +113,9 @@ export default function (pi: ExtensionAPI) {
         },
     });
 
-    // Register management tools — only queen and coordinator can spawn sub-agents.
-    if (identity.role === "queen" || identity.role === "coordinator") {
+    // Register management tools — queen always gets them, agents get them if canSpawn is true.
+    const canSpawn = identity.role === "queen" || process.env.PI_SWARM_CAN_SPAWN === "true";
+    if (canSpawn) {
         registerSwarmTool(pi);
         registerInstructTool(pi);
         registerStatusTool(pi);

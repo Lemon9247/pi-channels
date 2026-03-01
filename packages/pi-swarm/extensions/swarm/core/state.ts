@@ -13,7 +13,7 @@ export type AgentStatus = "starting" | "running" | "done" | "blocked" | "disconn
 
 export interface AgentInfo {
     name: string;
-    role: "coordinator" | "agent";
+    role: string;
     swarm: string;
     task: string;
     status: AgentStatus;

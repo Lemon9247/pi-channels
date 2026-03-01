@@ -55,6 +55,7 @@ const SwarmAgentSchema = Type.Object({
     tools: Type.Optional(Type.Array(Type.String(), { description: "Tools for inline agent" })),
     model: Type.Optional(Type.String({ description: "Model for this agent" })),
     cwd: Type.Optional(Type.String({ description: "Working directory for this agent" })),
+    canSpawn: Type.Optional(Type.Boolean({ description: "Grant this agent the ability to spawn sub-agents" })),
 });
 
 const TaskDirDef = Type.Object({
@@ -139,7 +140,7 @@ function handleRelayEvent(
         if (!existing) {
             state.agents.set(name, {
                 name,
-                role: role as "coordinator" | "agent",
+                role,
                 swarm,
                 task: "(sub-agent)",
                 status: "running",
@@ -153,7 +154,7 @@ function handleRelayEvent(
         } else {
             state.agents.set(name, {
                 name,
-                role: role as "coordinator" | "agent",
+                role,
                 swarm,
                 task: "(sub-agent)",
                 status: "done",
@@ -168,7 +169,7 @@ function handleRelayEvent(
         } else {
             state.agents.set(name, {
                 name,
-                role: role as "coordinator" | "agent",
+                role,
                 swarm,
                 task: "(sub-agent)",
                 status: "blocked",

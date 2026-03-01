@@ -143,6 +143,46 @@ export function findNearestProjectAgentsDir(cwd: string): string | null {
     return null;
 }
 
+// ─── canSpawn Resolution ─────────────────────────────────────────────
+
+/**
+ * Resolve whether an agent should have spawn capabilities.
+ *
+ * Resolution order (first defined wins):
+ * 1. Inline `canSpawn` field on the agent definition
+ * 2. Agent archetype frontmatter `canSpawn: true`
+ * 3. Default: false
+ *
+ * @param inlineCanSpawn The canSpawn value from the inline agent definition (may be undefined)
+ * @param archetypeName The agent archetype name (for lookup in knownAgents)
+ * @param knownAgents Map of discovered agent configs
+ */
+export function resolveCanSpawn(
+    inlineCanSpawn: boolean | undefined,
+    archetypeName: string | undefined,
+    knownAgents?: Map<string, AgentConfig>,
+): boolean {
+    // 1. Inline takes priority
+    if (inlineCanSpawn !== undefined) {
+        return inlineCanSpawn;
+    }
+
+    // 2. Check archetype frontmatter
+    if (archetypeName && knownAgents) {
+        const agentConfig = knownAgents.get(archetypeName);
+        if (agentConfig) {
+            const content = fs.readFileSync(agentConfig.filePath, "utf-8");
+            const { frontmatter } = parseFrontmatter(content);
+            if (frontmatter.canSpawn !== undefined) {
+                return frontmatter.canSpawn === "true";
+            }
+        }
+    }
+
+    // 3. Default to false
+    return false;
+}
+
 // ─── Discovery ───────────────────────────────────────────────────────
 
 /**

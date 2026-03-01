@@ -30,10 +30,11 @@ export interface AgentDef {
     cwd?: string;
 }
 
-/** Swarm-specific agent definition — adds role and swarm assignment. */
+/** Swarm-specific agent definition — adds role, swarm assignment, and canSpawn. */
 export interface SwarmAgentDef extends AgentDef {
-    role: "agent" | "coordinator";
+    role: string;
     swarm: string;
+    canSpawn?: boolean;
 }
 
 // ─── Shared Arg Building ─────────────────────────────────────────────
@@ -187,8 +188,13 @@ export function spawnAgent(
         PI_SWARM_AGENT_SWARM: agentDef.swarm,
     };
 
-    // Pass task dir to coordinators
-    if (taskDirPath && agentDef.role === "coordinator") {
+    // Pass canSpawn flag so agent can register spawn tools
+    if (agentDef.canSpawn) {
+        env.PI_SWARM_CAN_SPAWN = "true";
+    }
+
+    // Pass task dir to coordinators and canSpawn agents
+    if (taskDirPath && (agentDef.role === "coordinator" || agentDef.canSpawn)) {
         env.PI_SWARM_TASK_DIR = taskDirPath;
     }
 
