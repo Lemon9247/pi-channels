@@ -21,6 +21,12 @@ Agents self-coordinate via channels without waiting for pre-assignment from the 
 - Use the plan to guide your work and to see what other agents might be tackling.
 
 
+**Synchronization:**
+- To signal "phase X is complete", write a marker to the hive-mind (e.g., `## Phase X: Complete`). Other agents can check for this marker reliably.
+- To signal a file conflict or "stop working on X", use `message` with `urgent: true` so peers see it quickly.
+- Don't rely on `message` for blocking coordination — it's delivered after the peer's current tool chain, not during it.
+- For dependency gates (wait for another agent's output), poll the filesystem: check if the expected file exists or if a hive-mind section has content.
+
 **Use targeted messages:**
 - Use the `to` field on `message` when your finding is relevant to a specific agent, not everyone.
 - Use `broadcast: true` for cross-team announcements (in multi-team swarms).

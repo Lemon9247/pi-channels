@@ -57,6 +57,9 @@ export function registerAgentTools(pi: ExtensionAPI): void {
             "Use this for coordination, sharing findings, asking questions, and progress updates. " +
             "Reserve the notes file for persistent artifacts (code snippets, detailed analysis) " +
             "that need to survive the session.\n\n" +
+            "Set `urgent: true` for time-sensitive coordination: file conflicts, 'stop' signals, " +
+            "or dependency-ready notifications. Urgent messages interrupt the recipient after their " +
+            "current tool (delivered as steer). Normal messages wait for the tool chain to finish.\n\n" +
             "Optional 'to' field sends to a specific agent. " +
             "Optional 'progress' field updates the dashboard." +
             (topicChannel
@@ -66,6 +69,9 @@ export function registerAgentTools(pi: ExtensionAPI): void {
             content: Type.String({
                 description: "The message content — this is what recipients will read",
             }),
+            urgent: Type.Optional(Type.Boolean({
+                description: "Deliver as urgent — interrupts the recipient after their current tool. Use for file conflicts, stop signals, or dependency-ready notifications.",
+            })),
             to: Type.Optional(Type.String({
                 description: "Send to a specific agent by name (omit to broadcast)",
             })),
@@ -90,6 +96,7 @@ export function registerAgentTools(pi: ExtensionAPI): void {
                     role: identity.role,
                     content: params.content,
                     to: params.to,
+                    urgent: params.urgent,
                     progress: params.progress,
                 },
             };
