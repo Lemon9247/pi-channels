@@ -22,9 +22,21 @@ The `swarm` tool spawns agents as background processes connected via channels (U
 2. **Agents run in background** — you see live status in the widget and get notifications
 3. **Use `/hive`** for detailed agent activity, **`swarm_status`** for structured status
 4. **Use `swarm_instruct`** to send instructions to agents mid-swarm
-5. **When agents complete**, they call `hive_done` — you get a notification
+5. **Use `swarm_add`** to add more agents to the running swarm if needed
+6. **Use `swarm_kill`** to terminate a specific agent (recursive — kills sub-agents too)
+7. **When agents complete**, they call `hive_done` — you get a notification
 
 **Do NOT `bash sleep` to wait.** After launching, just stop — notifications arrive automatically. Stay available to chat with the user.
+
+## Available Tools
+
+| Tool | Purpose |
+|------|---------|
+| `swarm` | Start a new swarm with agent definitions |
+| `swarm_add` | Add agents to a **running** swarm mid-flight |
+| `swarm_status` | Check agent statuses (tree view with sub-agents) |
+| `swarm_instruct` | Send instructions to agents, swarms, or broadcast |
+| `swarm_kill` | Kill a specific agent + its sub-agents |
 
 ## Agent Types
 
@@ -68,7 +80,35 @@ swarm({
 })
 ```
 
+**Adding agents mid-swarm** (need more parallelism, a replacement, or a new direction):
+```typescript
+swarm_add({
+  agents: [
+    { name: "extra-scout", role: "agent", swarm: "frontend", agent: "scout", task: "Search for accessibility issues in UI components" }
+  ]
+})
+```
+New agents join the existing channels, appear in the dashboard, and can message/be messaged by other agents. Existing agents are notified via an `agent_added` broadcast on the general channel.
+
 **Worktrees** (optional): For implementation swarms where agents modify code, use git worktrees to isolate changes. Create with `git worktree add ../pi-channels-<name> -b swarm/<name>`, then pass `cwd` to each agent. Research swarms skip this.
+
+## Sub-Agents and Hierarchy
+
+Agents with `canSpawn: true` can launch their own sub-swarms. Sub-agent status is automatically relayed to the queen and rendered as a nested tree in the dashboard:
+
+```
+🐝 Swarm — 1/2 complete
+   ├ ⏳ coordinator (worker/sonnet-4-5)  spawning sub-swarm
+   │  ├ ✅ sub-scout-1 (scout/haiku-4-5)  mapped files
+   │  └ ⏳ sub-scout-2 (scout/haiku-4-5)  reading...
+   └ ✅ agent-1 (scout/haiku-4-5)  done
+```
+
+Key behaviors:
+- **Sub-agents don't block swarm completion** — only direct agents determine when `onAllDone` fires
+- **`swarm_kill` is recursive** — killing a coordinator also kills its sub-agents
+- **Relay is automatic** — no LLM involvement needed, coordinators relay at the framework level
+- **Arbitrary nesting depth** — a coordinator's sub-agent can itself be a coordinator with its own sub-agents
 
 ## After Completion
 
