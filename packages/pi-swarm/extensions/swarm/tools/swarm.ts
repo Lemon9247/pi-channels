@@ -618,6 +618,9 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                 taskDirPath,
                 queenClients,
                 messages: [],
+                knownAgents,
+                defaultCwd: ctx.cwd,
+                topicChannels,
             };
 
             // Wire up notifications to pi.sendMessage

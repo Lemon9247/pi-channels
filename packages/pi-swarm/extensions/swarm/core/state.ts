@@ -52,6 +52,13 @@ export interface SwarmState {
     /** Queen's connected ChannelClients for monitoring all channels. */
     queenClients: Map<string, ChannelClient>;
 
+    /** Discovered agents from swarm creation (for dynamic addition). */
+    knownAgents?: Map<string, import("./agents.js").AgentConfig>;
+    /** Default working directory from swarm creation. */
+    defaultCwd?: string;
+    /** Topic channels from swarm creation (swarm name → channel name). */
+    topicChannels?: Map<string, string>;
+
     // Callbacks for the extension to hook into
     onAgentDone?: (agentName: string, summary: string) => void;
     onAllDone?: () => void;
