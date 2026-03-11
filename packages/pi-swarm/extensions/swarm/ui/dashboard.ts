@@ -30,13 +30,20 @@ function summarize(agents: AgentInfo[]) {
 /**
  * Build a parent→children map from agents' spawnedBy field.
  * undefined key = top-level agents (no parent).
+ *
+ * If spawnedBy references a non-existent agent (orphaned sub-agent),
+ * the sub-agent is promoted to top-level to prevent invisible agents.
  */
 export function buildAgentTree(agents: AgentInfo[]): Map<string | undefined, AgentInfo[]> {
     const tree = new Map<string | undefined, AgentInfo[]>();
+    const agentNames = new Set(agents.map(a => a.name));
+
     for (const agent of agents) {
         const parent = agent.spawnedBy;
-        if (!tree.has(parent)) tree.set(parent, []);
-        tree.get(parent)!.push(agent);
+        // Promote orphans (parent doesn't exist) to top-level
+        const effectiveParent = (parent && agentNames.has(parent)) ? parent : undefined;
+        if (!tree.has(effectiveParent)) tree.set(effectiveParent, []);
+        tree.get(effectiveParent)!.push(agent);
     }
     return tree;
 }

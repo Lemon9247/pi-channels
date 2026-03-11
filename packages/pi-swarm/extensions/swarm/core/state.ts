@@ -200,6 +200,9 @@ export function upsertSubAgent(parentName: string, info: {
 }): boolean {
     if (!activeSwarm) return false;
 
+    // Validate parent exists — reject orphaned sub-agents
+    if (!activeSwarm.agents.has(parentName)) return false;
+
     const existing = activeSwarm.agents.get(info.name);
     if (existing) {
         // Update mutable fields

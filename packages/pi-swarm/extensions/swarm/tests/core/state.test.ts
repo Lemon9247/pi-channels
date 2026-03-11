@@ -380,6 +380,27 @@ describe("state", () => {
             });
             assert.equal(result, false);
         });
+
+        it("returns false when parent does not exist", () => {
+            const agents = new Map<string, AgentInfo>();
+            agents.set("coordinator", makeAgent("coordinator"));
+
+            setSwarmState({
+                generation: 0,
+                group: null,
+                groupPath: "/tmp/test",
+                agents,
+                queenClients: new Map(),
+                messages: [],
+            });
+
+            const result = upsertSubAgent("nonexistent-parent", {
+                name: "sub-scout-1",
+                status: "running",
+            });
+            assert.equal(result, false);
+            assert.ok(!getSwarmState()!.agents.has("sub-scout-1"));
+        });
     });
 
     describe("checkAllDone excludes sub-agents", () => {
