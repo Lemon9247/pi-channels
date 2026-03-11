@@ -29,6 +29,8 @@ import {
     updateAgentStatus,
     cleanupSwarm,
     pushMessage,
+    getParentClients,
+    upsertSubAgent,
 } from "../core/state.js";
 import { getIdentity } from "../core/identity.js";
 import { scaffoldTaskDir, type ScaffoldResult } from "../core/scaffold.js";
@@ -89,6 +91,45 @@ export interface ToolContext {
 }
 
 /**
+ * If we're a coordinator inside a parent swarm, relay a sub-agent's
+ * current status up to the parent queen via sub_agent_status message.
+ */
+function relaySubAgentStatus(agentName: string, state: SwarmState): void {
+    const parentClientsMap = getParentClients();
+    if (!parentClientsMap) return; // We're the top-level queen, no relay needed
+
+    const agent = state.agents.get(agentName);
+    if (!agent) return;
+
+    const queenInbox = parentClientsMap.get(QUEEN_INBOX);
+    if (!queenInbox?.connected) return;
+
+    const identity = getIdentity();
+    try {
+        queenInbox.send({
+            msg: `sub-agent status: ${agentName} → ${agent.status}`,
+            data: {
+                type: "sub_agent_status",
+                from: identity.name,
+                subAgent: {
+                    name: agent.name,
+                    status: agent.status,
+                    role: agent.role,
+                    swarm: agent.swarm,
+                    task: agent.task,
+                    doneSummary: agent.doneSummary,
+                    blockerDescription: agent.blockerDescription,
+                    progressPhase: agent.progressPhase,
+                    progressPercent: agent.progressPercent,
+                    model: agent.model,
+                    agentType: agent.agentType,
+                },
+            },
+        });
+    } catch { /* best effort */ }
+}
+
+/**
  * Handle an incoming channel message from the queen's perspective.
  * Parses data.type to dispatch to appropriate handler.
  */
@@ -119,6 +160,7 @@ function handleQueenMessage(
         case "register": {
             if (updateAgentStatus(senderName, "running")) {
                 pushSyntheticEvent(senderName, "message", `registered (${msg.data.role || "agent"})`);
+                relaySubAgentStatus(senderName, state);
                 updateDashboard(ctx);
             }
             break;
@@ -128,6 +170,7 @@ function handleQueenMessage(
             const summary = (msg.data.summary as string) || "";
             if (updateAgentStatus(senderName, "done", { doneSummary: summary })) {
                 state.onAgentDone?.(senderName, summary);
+                relaySubAgentStatus(senderName, state);
                 updateDashboard(ctx);
 
                 // Kill the agent process — it's completed its work.
@@ -151,6 +194,7 @@ function handleQueenMessage(
             const description = (msg.data.description as string) || "";
             if (updateAgentStatus(senderName, "blocked", { blockerDescription: description })) {
                 state.onBlocker?.(senderName, description);
+                relaySubAgentStatus(senderName, state);
                 updateDashboard(ctx);
             }
             break;
@@ -177,11 +221,59 @@ function handleQueenMessage(
             }
             pushSyntheticEvent(senderName, "message", content);
             state.onMessage?.(content, senderName);
+            // Relay progress updates (not message content) to parent
+            if (progress) {
+                relaySubAgentStatus(senderName, state);
+            }
             updateDashboard(ctx);
             break;
         }
 
-        // No relay case — flat architecture means queen sees all events directly
+        case "sub_agent_status": {
+            // A coordinator is relaying a sub-agent's status up to us
+            const subAgent = msg.data.subAgent as {
+                name: string;
+                status: string;
+                role?: string;
+                swarm?: string;
+                task?: string;
+                doneSummary?: string;
+                blockerDescription?: string;
+                progressPhase?: string;
+                progressPercent?: number;
+                model?: string;
+                agentType?: string;
+            } | undefined;
+            if (!subAgent) break;
+
+            upsertSubAgent(senderName, {
+                name: subAgent.name,
+                status: subAgent.status as any,
+                role: subAgent.role as any,
+                swarm: subAgent.swarm,
+                task: subAgent.task,
+                doneSummary: subAgent.doneSummary,
+                blockerDescription: subAgent.blockerDescription,
+                progressPhase: subAgent.progressPhase,
+                progressPercent: subAgent.progressPercent,
+                model: subAgent.model,
+                agentType: subAgent.agentType,
+            });
+
+            // If we're also a coordinator, relay upward (recursive nesting)
+            const parentClientsForRelay = getParentClients();
+            if (parentClientsForRelay) {
+                const queenInbox = parentClientsForRelay.get(QUEEN_INBOX);
+                if (queenInbox?.connected) {
+                    try {
+                        queenInbox.send(msg);
+                    } catch { /* best effort */ }
+                }
+            }
+
+            updateDashboard(ctx);
+            break;
+        }
     }
 }
 

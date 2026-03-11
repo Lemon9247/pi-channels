@@ -16,6 +16,7 @@ import {
     setParentClients,
     cleanupSwarm,
     isValidTransition,
+    upsertSubAgent,
     VALID_TRANSITIONS,
     type SwarmState,
     type AgentInfo,
@@ -308,6 +309,124 @@ describe("state", () => {
         it("is safe to call when no swarm exists", async () => {
             await cleanupSwarm(); // Should not throw
             assert.equal(getSwarmState(), null);
+        });
+    });
+
+    describe("upsertSubAgent", () => {
+        it("creates a new sub-agent with spawnedBy set", () => {
+            const agents = new Map<string, AgentInfo>();
+            agents.set("coordinator", makeAgent("coordinator"));
+
+            setSwarmState({
+                generation: 0,
+                group: null,
+                groupPath: "/tmp/test",
+                agents,
+                queenClients: new Map(),
+            });
+
+            const result = upsertSubAgent("coordinator", {
+                name: "sub-scout-1",
+                status: "running",
+                role: "agent",
+                swarm: "recon",
+                task: "read files",
+                model: "haiku-4-5",
+                agentType: "scout",
+            });
+
+            assert.equal(result, true);
+            const sub = getSwarmState()!.agents.get("sub-scout-1")!;
+            assert.equal(sub.spawnedBy, "coordinator");
+            assert.equal(sub.status, "running");
+            assert.equal(sub.swarm, "recon");
+            assert.equal(sub.model, "haiku-4-5");
+        });
+
+        it("updates an existing sub-agent's mutable fields", () => {
+            const agents = new Map<string, AgentInfo>();
+            agents.set("coordinator", makeAgent("coordinator"));
+
+            setSwarmState({
+                generation: 0,
+                group: null,
+                groupPath: "/tmp/test",
+                agents,
+                queenClients: new Map(),
+            });
+
+            upsertSubAgent("coordinator", {
+                name: "sub-scout-1",
+                status: "running",
+            });
+
+            upsertSubAgent("coordinator", {
+                name: "sub-scout-1",
+                status: "done",
+                doneSummary: "found the files",
+            });
+
+            const sub = getSwarmState()!.agents.get("sub-scout-1")!;
+            assert.equal(sub.status, "done");
+            assert.equal(sub.doneSummary, "found the files");
+            assert.equal(sub.spawnedBy, "coordinator");
+        });
+
+        it("returns false when no active swarm", async () => {
+            await cleanupSwarm();
+            const result = upsertSubAgent("coordinator", {
+                name: "sub-scout-1",
+                status: "running",
+            });
+            assert.equal(result, false);
+        });
+    });
+
+    describe("checkAllDone excludes sub-agents", () => {
+        it("fires onAllDone when direct agents finish even if sub-agents are running", () => {
+            let allDoneFired = false;
+            const agents = new Map<string, AgentInfo>();
+            agents.set("coordinator", makeAgent("coordinator"));
+
+            const state: SwarmState = {
+                generation: 0,
+                group: null,
+                groupPath: "/tmp/test",
+                agents,
+                queenClients: new Map(),
+            };
+            state.onAllDone = () => { allDoneFired = true; };
+            setSwarmState(state);
+
+            // Add a sub-agent that's still running
+            upsertSubAgent("coordinator", {
+                name: "sub-scout-1",
+                status: "running",
+            });
+
+            // Direct agent finishes
+            updateAgentStatus("coordinator", "done");
+            assert.equal(allDoneFired, true);
+        });
+
+        it("does not fire onAllDone when a direct agent is still running", () => {
+            let allDoneFired = false;
+            const agents = new Map<string, AgentInfo>();
+            agents.set("coordinator", makeAgent("coordinator"));
+            agents.set("worker", makeAgent("worker"));
+
+            const state: SwarmState = {
+                generation: 0,
+                group: null,
+                groupPath: "/tmp/test",
+                agents,
+                queenClients: new Map(),
+            };
+            state.onAllDone = () => { allDoneFired = true; };
+            setSwarmState(state);
+
+            updateAgentStatus("coordinator", "done");
+            assert.equal(allDoneFired, false);
         });
     });
 

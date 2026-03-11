@@ -156,12 +156,72 @@ export function updateAgentStatus(name: string, status: AgentStatus, extra?: Par
 
 function checkAllDone(): void {
     if (!activeSwarm) return;
-    const allDone = Array.from(activeSwarm.agents.values()).every(
+    // Only direct agents (no spawnedBy) determine swarm completion.
+    // Sub-agents are tracked by their coordinator — the queen only
+    // monitors them for dashboard visibility.
+    const directAgents = Array.from(activeSwarm.agents.values()).filter(
+        (a) => !a.spawnedBy,
+    );
+    const allDone = directAgents.every(
         (a) => a.status === "done" || a.status === "crashed" || a.status === "disconnected",
     );
     if (allDone) {
         activeSwarm.onAllDone?.();
     }
+}
+
+/**
+ * Upsert a sub-agent into the active swarm's agent map.
+ *
+ * If the sub-agent doesn't exist, creates a new AgentInfo with spawnedBy set.
+ * If it already exists, updates mutable fields (status, summary, progress, etc).
+ *
+ * Sub-agents don't participate in checkAllDone — only direct agents do.
+ */
+export function upsertSubAgent(parentName: string, info: {
+    name: string;
+    status: AgentStatus;
+    role?: Role;
+    swarm?: string;
+    task?: string;
+    doneSummary?: string;
+    blockerDescription?: string;
+    progressPhase?: string;
+    progressPercent?: number;
+    model?: string;
+    agentType?: string;
+}): boolean {
+    if (!activeSwarm) return false;
+
+    const existing = activeSwarm.agents.get(info.name);
+    if (existing) {
+        // Update mutable fields
+        existing.status = info.status;
+        if (info.doneSummary !== undefined) existing.doneSummary = info.doneSummary;
+        if (info.blockerDescription !== undefined) existing.blockerDescription = info.blockerDescription;
+        if (info.progressPhase !== undefined) existing.progressPhase = info.progressPhase;
+        if (info.progressPercent !== undefined) existing.progressPercent = info.progressPercent;
+        if (info.model !== undefined) existing.model = info.model;
+        if (info.agentType !== undefined) existing.agentType = info.agentType;
+        return true;
+    }
+
+    // New sub-agent — create entry
+    activeSwarm.agents.set(info.name, {
+        name: info.name,
+        role: info.role || "agent",
+        swarm: info.swarm || "sub",
+        task: info.task || "",
+        status: info.status,
+        spawnedBy: parentName,
+        doneSummary: info.doneSummary,
+        blockerDescription: info.blockerDescription,
+        progressPhase: info.progressPhase,
+        progressPercent: info.progressPercent,
+        model: info.model,
+        agentType: info.agentType,
+    });
+    return true;
 }
 
 /**
