@@ -12,7 +12,7 @@ import * as crypto from "node:crypto";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import type { Message } from "agent-channels";
+import type { ChannelClient, Message } from "agent-channels";
 import {
     createSwarmChannelGroup,
     connectToMultiple,
@@ -29,6 +29,8 @@ import {
     updateAgentStatus,
     cleanupSwarm,
     pushMessage,
+    getParentClients,
+    upsertSubAgent,
 } from "../core/state.js";
 import { getIdentity } from "../core/identity.js";
 import { scaffoldTaskDir, type ScaffoldResult } from "../core/scaffold.js";
@@ -78,7 +80,7 @@ function generateSwarmId(): string {
 }
 
 /** Minimal structural type for the tool execution context from pi. */
-interface ToolContext {
+export interface ToolContext {
     cwd: string;
     hasUI: boolean;
     ui: {
@@ -86,6 +88,45 @@ interface ToolContext {
         setStatus(id: string, status: unknown): void;
         notify(msg: string, level: string): void;
     };
+}
+
+/**
+ * If we're a coordinator inside a parent swarm, relay a sub-agent's
+ * current status up to the parent queen via sub_agent_status message.
+ */
+function relaySubAgentStatus(agentName: string, state: SwarmState): void {
+    const parentClientsMap = getParentClients();
+    if (!parentClientsMap) return; // We're the top-level queen, no relay needed
+
+    const agent = state.agents.get(agentName);
+    if (!agent) return;
+
+    const queenInbox = parentClientsMap.get(QUEEN_INBOX);
+    if (!queenInbox?.connected) return;
+
+    const identity = getIdentity();
+    try {
+        queenInbox.send({
+            msg: `sub-agent status: ${agentName} → ${agent.status}`,
+            data: {
+                type: "sub_agent_status",
+                from: identity.name,
+                subAgent: {
+                    name: agent.name,
+                    status: agent.status,
+                    role: agent.role,
+                    swarm: agent.swarm,
+                    task: agent.task,
+                    doneSummary: agent.doneSummary,
+                    blockerDescription: agent.blockerDescription,
+                    progressPhase: agent.progressPhase,
+                    progressPercent: agent.progressPercent,
+                    model: agent.model,
+                    agentType: agent.agentType,
+                },
+            },
+        });
+    } catch { /* best effort */ }
 }
 
 /**
@@ -119,6 +160,7 @@ function handleQueenMessage(
         case "register": {
             if (updateAgentStatus(senderName, "running")) {
                 pushSyntheticEvent(senderName, "message", `registered (${msg.data.role || "agent"})`);
+                relaySubAgentStatus(senderName, state);
                 updateDashboard(ctx);
             }
             break;
@@ -128,6 +170,7 @@ function handleQueenMessage(
             const summary = (msg.data.summary as string) || "";
             if (updateAgentStatus(senderName, "done", { doneSummary: summary })) {
                 state.onAgentDone?.(senderName, summary);
+                relaySubAgentStatus(senderName, state);
                 updateDashboard(ctx);
 
                 // Kill the agent process — it's completed its work.
@@ -151,6 +194,7 @@ function handleQueenMessage(
             const description = (msg.data.description as string) || "";
             if (updateAgentStatus(senderName, "blocked", { blockerDescription: description })) {
                 state.onBlocker?.(senderName, description);
+                relaySubAgentStatus(senderName, state);
                 updateDashboard(ctx);
             }
             break;
@@ -177,11 +221,59 @@ function handleQueenMessage(
             }
             pushSyntheticEvent(senderName, "message", content);
             state.onMessage?.(content, senderName);
+            // Relay progress updates (not message content) to parent
+            if (progress) {
+                relaySubAgentStatus(senderName, state);
+            }
             updateDashboard(ctx);
             break;
         }
 
-        // No relay case — flat architecture means queen sees all events directly
+        case "sub_agent_status": {
+            // A coordinator is relaying a sub-agent's status up to us
+            const subAgent = msg.data.subAgent as {
+                name: string;
+                status: string;
+                role?: string;
+                swarm?: string;
+                task?: string;
+                doneSummary?: string;
+                blockerDescription?: string;
+                progressPhase?: string;
+                progressPercent?: number;
+                model?: string;
+                agentType?: string;
+            } | undefined;
+            if (!subAgent) break;
+
+            upsertSubAgent(senderName, {
+                name: subAgent.name,
+                status: subAgent.status as any,
+                role: subAgent.role as any,
+                swarm: subAgent.swarm,
+                task: subAgent.task,
+                doneSummary: subAgent.doneSummary,
+                blockerDescription: subAgent.blockerDescription,
+                progressPhase: subAgent.progressPhase,
+                progressPercent: subAgent.progressPercent,
+                model: subAgent.model,
+                agentType: subAgent.agentType,
+            });
+
+            // If we're also a coordinator, relay upward (recursive nesting)
+            const parentClientsForRelay = getParentClients();
+            if (parentClientsForRelay) {
+                const queenInbox = parentClientsForRelay.get(QUEEN_INBOX);
+                if (queenInbox?.connected) {
+                    try {
+                        queenInbox.send(msg);
+                    } catch { /* best effort */ }
+                }
+            }
+
+            updateDashboard(ctx);
+            break;
+        }
     }
 }
 
@@ -197,7 +289,7 @@ type BufferedMessage = {
 const messageBuffer: BufferedMessage[] = [];
 let flushInterval: ReturnType<typeof setInterval> | null = null;
 
-function bufferedSendMessage(
+export function bufferedSendMessage(
     pi: ExtensionAPI,
     message: BufferedMessage["message"],
     options?: BufferedMessage["options"],
@@ -219,6 +311,156 @@ function startBufferFlush(pi: ExtensionAPI): void {
             }
         }
     }, 500);
+}
+
+// ─── Shared Agent Lifecycle Wiring ──────────────────────────────────
+
+/**
+ * Wire up process lifecycle handlers for a spawned agent.
+ *
+ * Handles: stderr capture, exit detection (done/crashed), crash broadcasting,
+ * error handling, stdout activity tracking, and 30s registration timeout.
+ *
+ * Used by both `swarm` (initial spawn) and `swarm_add` (dynamic addition).
+ */
+export function wireAgentProcess(
+    agentName: string,
+    proc: import("node:child_process").ChildProcess,
+    gen: number,
+    ctx: ToolContext,
+    pi: ExtensionAPI,
+): void {
+    // Capture stderr for debugging
+    let stderr = "";
+    proc.stderr?.on("data", (data: Buffer) => {
+        stderr = (stderr + data.toString()).slice(-2048);
+    });
+
+    // Track process exit
+    proc.on("close", (code: number | null) => {
+        if (getSwarmGeneration() !== gen) return;
+        const current = getSwarmState();
+        if (!current) return;
+        const agent = current.agents.get(agentName);
+        if (agent && agent.status !== "done") {
+            if (code === 0) {
+                updateAgentStatus(agentName, "done");
+            } else {
+                updateAgentStatus(agentName, "crashed");
+
+                // Build crash info with last activity
+                const activity = getAgentActivity(agentName);
+                const lastActivity = activity.slice(-3).map(e => e.summary).join("; ");
+                const crashInfo = `💀 **${agentName}** crashed (exit code ${code}).` +
+                    (lastActivity ? `\nLast activity: ${lastActivity}` : "") +
+                    (stderr ? `\n\nLast stderr:\n\`\`\`\n${stderr.slice(-500)}\n\`\`\`` : "");
+
+                // Broadcast to general channel so other agents can adjust
+                const generalClient = current.queenClients.get(GENERAL_CHANNEL);
+                if (generalClient?.connected) {
+                    try {
+                        generalClient.send({
+                            msg: `Agent ${agentName} crashed (exit code ${code})`,
+                            data: {
+                                type: "agent_crashed",
+                                from: "system",
+                                agent: agentName,
+                                exitCode: code,
+                                lastActivity: lastActivity || undefined,
+                            },
+                        });
+                    } catch { /* best effort */ }
+                }
+
+                // Active interrupt to queen
+                bufferedSendMessage(pi,
+                    {
+                        customType: "swarm-blocker",
+                        content: crashInfo,
+                        display: true,
+                    },
+                    { deliverAs: "steer" },
+                );
+            }
+            updateDashboard(ctx);
+        }
+    });
+
+    proc.on("error", (err: Error) => {
+        if (getSwarmGeneration() !== gen) return;
+        updateAgentStatus(agentName, "crashed");
+
+        // Broadcast spawn failure to general channel
+        const current = getSwarmState();
+        const generalClient = current?.queenClients.get(GENERAL_CHANNEL);
+        if (generalClient?.connected) {
+            try {
+                generalClient.send({
+                    msg: `Agent ${agentName} failed to start: ${err.message}`,
+                    data: {
+                        type: "agent_crashed",
+                        from: "system",
+                        agent: agentName,
+                        exitCode: -1,
+                        error: err.message,
+                    },
+                });
+            } catch { /* best effort */ }
+        }
+
+        bufferedSendMessage(pi,
+            {
+                customType: "swarm-blocker",
+                content: `💀 **${agentName}** failed to start: ${err.message}`,
+                display: true,
+            },
+            { deliverAs: "steer" },
+        );
+        updateDashboard(ctx);
+    });
+
+    if (proc.stdout) {
+        trackAgentOutput(agentName, proc.stdout);
+    }
+
+    // Per-agent registration timeout
+    setTimeout(() => {
+        if (getSwarmGeneration() !== gen) return;
+        const current = getSwarmState();
+        if (!current) return;
+        const agent = current.agents.get(agentName);
+        if (agent && agent.status === "starting") {
+            updateAgentStatus(agentName, "crashed");
+            bufferedSendMessage(pi,
+                {
+                    customType: "swarm-blocker",
+                    content: `💀 **${agentName}** failed to register within 30s — marked as crashed.`,
+                    display: true,
+                },
+                { deliverAs: "steer" },
+            );
+            updateDashboard(ctx);
+        }
+    }, 30_000);
+}
+
+/**
+ * Set up a queen message listener on a channel client.
+ * Used by both `swarm` (initial setup) and `swarm_add` (new inbox channels).
+ */
+export function setupQueenListener(
+    client: ChannelClient,
+    channelName: string,
+    gen: number,
+    ctx: ToolContext,
+    pi: ExtensionAPI,
+): void {
+    client.on("message", (msg: Message) => {
+        if (getSwarmGeneration() !== gen) return;
+        const currentState = getSwarmState();
+        if (!currentState) return;
+        handleQueenMessage(currentState, gen, msg, channelName, currentState.agents, ctx, pi);
+    });
 }
 
 export function registerSwarmTool(pi: ExtensionAPI): void {
@@ -376,6 +618,9 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                 taskDirPath,
                 queenClients,
                 messages: [],
+                knownAgents,
+                defaultCwd: ctx.cwd,
+                topicChannels,
             };
 
             // Wire up notifications to pi.sendMessage
@@ -436,12 +681,7 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
 
             // Set up message listeners on all queen channels
             for (const [channelName, client] of queenClients.entries()) {
-                client.on("message", (msg: Message) => {
-                    if (getSwarmGeneration() !== gen) return;
-                    const currentState = getSwarmState();
-                    if (!currentState) return;
-                    handleQueenMessage(currentState, gen, msg, channelName, agentMap, ctx, pi);
-                });
+                setupQueenListener(client, channelName, gen, ctx, pi);
             }
 
             // Spawn all agents
@@ -460,122 +700,8 @@ export function registerSwarmTool(pi: ExtensionAPI): void {
                 agentInfo.process = proc;
                 agentInfo.model = model;
 
-                // Capture stderr for debugging
-                let stderr = "";
-                proc.stderr?.on("data", (data: Buffer) => {
-                    stderr = (stderr + data.toString()).slice(-2048);
-                });
-
-                // Track process exit
-                proc.on("close", (code: number | null) => {
-                    if (getSwarmGeneration() !== gen) return;
-                    const current = getSwarmState();
-                    if (!current) return;
-                    const agent = current.agents.get(agentDef.name);
-                    if (agent && agent.status !== "done") {
-                        if (code === 0) {
-                            updateAgentStatus(agentDef.name, "done");
-                        } else {
-                            updateAgentStatus(agentDef.name, "crashed");
-
-                            // Build crash info with last activity
-                            const activity = getAgentActivity(agentDef.name);
-                            const lastActivity = activity.slice(-3).map(e => e.summary).join("; ");
-                            const crashInfo = `💀 **${agentDef.name}** crashed (exit code ${code}).` +
-                                (lastActivity ? `\nLast activity: ${lastActivity}` : "") +
-                                (stderr ? `\n\nLast stderr:\n\`\`\`\n${stderr.slice(-500)}\n\`\`\`` : "");
-
-                            // Broadcast to general channel so other agents can adjust
-                            const generalClient = current.queenClients.get(GENERAL_CHANNEL);
-                            if (generalClient?.connected) {
-                                try {
-                                    generalClient.send({
-                                        msg: `Agent ${agentDef.name} crashed (exit code ${code})`,
-                                        data: {
-                                            type: "agent_crashed",
-                                            from: "system",
-                                            agent: agentDef.name,
-                                            exitCode: code,
-                                            lastActivity: lastActivity || undefined,
-                                        },
-                                    });
-                                } catch { /* best effort */ }
-                            }
-
-                            // Active interrupt to queen
-                            bufferedSendMessage(pi,
-                                {
-                                    customType: "swarm-blocker",
-                                    content: crashInfo,
-                                    display: true,
-                                },
-                                { deliverAs: "steer" },
-                            );
-                        }
-                        updateDashboard(ctx);
-                    }
-                });
-
-                proc.on("error", (err: Error) => {
-                    if (getSwarmGeneration() !== gen) return;
-                    updateAgentStatus(agentDef.name, "crashed");
-
-                    // Broadcast spawn failure to general channel
-                    const current = getSwarmState();
-                    const generalClient = current?.queenClients.get(GENERAL_CHANNEL);
-                    if (generalClient?.connected) {
-                        try {
-                            generalClient.send({
-                                msg: `Agent ${agentDef.name} failed to start: ${err.message}`,
-                                data: {
-                                    type: "agent_crashed",
-                                    from: "system",
-                                    agent: agentDef.name,
-                                    exitCode: -1,
-                                    error: err.message,
-                                },
-                            });
-                        } catch { /* best effort */ }
-                    }
-
-                    bufferedSendMessage(pi,
-                        {
-                            customType: "swarm-blocker",
-                            content: `💀 **${agentDef.name}** failed to start: ${err.message}`,
-                            display: true,
-                        },
-                        { deliverAs: "steer" },
-                    );
-                    updateDashboard(ctx);
-                });
-
-                if (proc.stdout) {
-                    trackAgentOutput(agentDef.name, proc.stdout);
-                }
+                wireAgentProcess(agentDef.name, proc, gen, ctx, pi);
             }
-
-            // Timeout for agents stuck in "starting"
-            setTimeout(() => {
-                if (getSwarmGeneration() !== gen) return;
-                const current = getSwarmState();
-                if (!current) return;
-                let anyStuck = false;
-                for (const agent of current.agents.values()) {
-                    if (agent.status === "starting") {
-                        anyStuck = true;
-                        updateAgentStatus(agent.name, "crashed");
-                        bufferedSendMessage(pi,
-                            {
-                                customType: "swarm-blocker",
-                                content: `💀 **${agent.name}** failed to register within 30s — marked as crashed.`,
-                                display: true,
-                            },
-                            { deliverAs: "steer" },
-                        );
-                    }
-                }
-                if (anyStuck) updateDashboard(ctx);
-            }, 30_000);
 
             // Initialize dashboard
             updateDashboard(ctx);

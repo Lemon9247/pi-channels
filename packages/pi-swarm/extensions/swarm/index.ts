@@ -15,6 +15,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { createIdentity, getChannelGroupPath, getInboxChannel, getSubscribeChannels } from "./core/identity.js";
 import { connectToMultiple } from "./core/channels.js";
 import { registerSwarmTool } from "./tools/swarm.js";
+import { registerAddTool } from "./tools/add.js";
 import { registerInstructTool } from "./tools/instruct.js";
 import { registerStatusTool } from "./tools/status.js";
 import { registerKillTool } from "./tools/kill.js";
@@ -118,6 +119,7 @@ export default function (pi: ExtensionAPI) {
     const canSpawn = identity.role === "queen" || process.env.PI_SWARM_CAN_SPAWN === "true";
     if (canSpawn) {
         registerSwarmTool(pi);
+        registerAddTool(pi);
         registerInstructTool(pi);
         registerStatusTool(pi);
         registerKillTool(pi);

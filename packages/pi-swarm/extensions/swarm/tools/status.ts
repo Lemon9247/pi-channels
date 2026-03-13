@@ -10,6 +10,7 @@ import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getSwarmState, type AgentInfo } from "../core/state.js";
 import { shortModelName } from "../ui/format.js";
+import { buildAgentTree } from "../ui/dashboard.js";
 
 function statusIcon(status: string): string {
     switch (status) {
@@ -30,6 +31,44 @@ function statusIcon(status: string): string {
     }
 }
 
+function agentRoleDisplay(agent: AgentInfo): string {
+    if (agent.agentType && agent.model) {
+        return `${agent.agentType}/${shortModelName(agent.model)}`;
+    }
+    if (agent.agentType) return agent.agentType;
+    if (agent.model) {
+        const role = agent.role === "coordinator" ? "coordinator" : "agent";
+        return `${role}/${shortModelName(agent.model)}`;
+    }
+    return agent.role;
+}
+
+function renderAgentMarkdown(
+    agent: AgentInfo,
+    tree: Map<string | undefined, AgentInfo[]>,
+    indent: string,
+): string {
+    const role = agentRoleDisplay(agent);
+    let report = `${indent}- ${statusIcon(agent.status)} **${agent.name}** (${role}) — ${agent.status}`;
+    if (agent.doneSummary) report += `\n${indent}  Done: ${agent.doneSummary}`;
+    if (agent.blockerDescription) report += `\n${indent}  Blocked: ${agent.blockerDescription}`;
+    if (agent.progressPhase || agent.progressPercent != null || agent.progressDetail) {
+        const parts: string[] = [];
+        if (agent.progressPhase) parts.push(agent.progressPhase);
+        if (agent.progressPercent != null) parts.push(`${agent.progressPercent}%`);
+        if (agent.progressDetail) parts.push(agent.progressDetail);
+        report += `\n${indent}  Progress: ${parts.join(" — ")}`;
+    }
+    report += "\n";
+
+    // Render sub-agents indented
+    const children = tree.get(agent.name) || [];
+    for (const child of children) {
+        report += renderAgentMarkdown(child, tree, indent + "  ");
+    }
+    return report;
+}
+
 export function registerStatusTool(pi: ExtensionAPI): void {
     pi.registerTool({
         name: "swarm_status",
@@ -46,14 +85,17 @@ export function registerStatusTool(pi: ExtensionAPI): void {
             }
 
             const agents = Array.from(state.agents.values());
-            const running = agents.filter((a) => a.status === "running" || a.status === "starting").length;
-            const done = agents.filter((a) => a.status === "done").length;
-            const blocked = agents.filter((a) => a.status === "blocked").length;
-            const failed = agents.filter((a) => a.status === "crashed" || a.status === "disconnected").length;
+            const directAgents = agents.filter(a => !a.spawnedBy);
+            const subAgents = agents.filter(a => a.spawnedBy);
+            const running = directAgents.filter((a) => a.status === "running" || a.status === "starting").length;
+            const done = directAgents.filter((a) => a.status === "done").length;
+            const blocked = directAgents.filter((a) => a.status === "blocked").length;
+            const failed = directAgents.filter((a) => a.status === "crashed" || a.status === "disconnected").length;
 
             let report = `## Swarm Status\n\n`;
-            report += `**Total:** ${agents.length} agents | `;
-            report += `Running: ${running}`;
+            report += `**Total:** ${directAgents.length} agents`;
+            if (subAgents.length > 0) report += ` (+${subAgents.length} sub-agents)`;
+            report += ` | Running: ${running}`;
             report += ` | Done: ${done}`;
             if (blocked > 0) report += ` | Blocked: ${blocked}`;
             if (failed > 0) report += ` | Failed: ${failed}`;
@@ -63,9 +105,13 @@ export function registerStatusTool(pi: ExtensionAPI): void {
                 report += `**Task dir:** ${state.taskDirPath}\n\n`;
             }
 
-            // Group by swarm for display
+            // Build tree and render hierarchically
+            const tree = buildAgentTree(agents);
+            const topLevel = tree.get(undefined) || [];
+
+            // Group top-level by swarm
             const bySwarm = new Map<string, AgentInfo[]>();
-            for (const agent of agents) {
+            for (const agent of topLevel) {
                 if (!bySwarm.has(agent.swarm)) bySwarm.set(agent.swarm, []);
                 bySwarm.get(agent.swarm)!.push(agent);
             }
@@ -73,30 +119,7 @@ export function registerStatusTool(pi: ExtensionAPI): void {
             for (const [swarmName, swarmAgents] of bySwarm) {
                 report += `### ${swarmName}\n`;
                 for (const agent of swarmAgents) {
-                    // Display archetype + model instead of just role
-                    let roleDisplay: string;
-                    if (agent.agentType && agent.model) {
-                        roleDisplay = `${agent.agentType}/${shortModelName(agent.model)}`;
-                    } else if (agent.agentType) {
-                        roleDisplay = agent.agentType;
-                    } else if (agent.model) {
-                        const role = agent.role === "coordinator" ? "coordinator" : "agent";
-                        roleDisplay = `${role}/${shortModelName(agent.model)}`;
-                    } else {
-                        roleDisplay = agent.role;
-                    }
-
-                    report += `- ${statusIcon(agent.status)} **${agent.name}** (${roleDisplay}) — ${agent.status}`;
-                    if (agent.doneSummary) report += `\n  Done: ${agent.doneSummary}`;
-                    if (agent.blockerDescription) report += `\n  Blocked: ${agent.blockerDescription}`;
-                    if (agent.progressPhase || agent.progressPercent != null || agent.progressDetail) {
-                        const parts: string[] = [];
-                        if (agent.progressPhase) parts.push(agent.progressPhase);
-                        if (agent.progressPercent != null) parts.push(`${agent.progressPercent}%`);
-                        if (agent.progressDetail) parts.push(agent.progressDetail);
-                        report += `\n  Progress: ${parts.join(" — ")}`;
-                    }
-                    report += "\n";
+                    report += renderAgentMarkdown(agent, tree, "");
                 }
                 report += "\n";
             }
@@ -116,6 +139,7 @@ export function registerStatusTool(pi: ExtensionAPI): void {
                         status: a.status,
                         model: a.model,
                         agentType: a.agentType,
+                        spawnedBy: a.spawnedBy,
                     })),
                 },
             };
