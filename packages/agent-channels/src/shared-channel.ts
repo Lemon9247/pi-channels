@@ -292,6 +292,8 @@ export class SharedChannel extends EventEmitter {
         });
 
         client.on("error", (err: Error) => {
+            // Suppress ECONNRESET — expected when server shuts down
+            if ((err as NodeJS.ErrnoException).code === "ECONNRESET") return;
             this.emit("error", err);
         });
     }
