@@ -415,7 +415,7 @@ export default function channelsExtension(pi: any): void {
                     projectDir,
                     overlayState,
                     connectToMesh,
-                });
+                }, done);
             },
             { overlay: true },
         );
