@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import * as path from "node:path";
 
 export type TerminalType = "tmux" | "kitty" | "iterm2" | "macos-terminal" | "gnome-terminal" | "xterm" | "konsole" | "unknown";
@@ -70,8 +70,12 @@ export function spawnTerminal(options: {
             }
 
             case "kitty": {
+                const child = spawn("kitty", ["-T", "pi", "sh", "-c", piCmd], {
+                    stdio: "ignore",
+                    detached: true,
+                });
+                child.unref();
                 const cmd = `kitty -T "pi" sh -c '${piCmd.replace(/'/g, "'\\''")}'`;
-                execSync(cmd, { stdio: "ignore", detached: true });
                 return { success: true, command: cmd, terminal };
             }
 
