@@ -1,105 +1,104 @@
 # pi-channels
 
-Channel-based messaging and multi-agent coordination for the [pi coding agent](https://github.com/badlogic/pi-mono).
-
-This monorepo contains:
-
-| Package | Description |
-|---------|-------------|
-| [`agent-channels`](packages/agent-channels/) | Standalone messaging library — channels over Unix domain sockets, fan-out, groups, TCP bridge. Zero pi coupling. |
-| [`pi-swarm`](packages/pi-swarm/) | Pi extension — spawn parallel agents with hive-mind coordination, live dashboards, and multi-channel messaging. |
+Inter-session agent communication for the [pi](https://github.com/anthropics/pi) coding agent. Lets independently-running pi sessions talk to each other — no hidden subagents, no task orchestration frameworks. Each pi session is a visible, interactive peer.
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────┐
-│  Consumers (pi extensions, standalone tools, etc.)   │
-│  ┌──────────┐  ┌─────────────────┐                   │
-│  │ pi-swarm │  │ pi-bridge-*     │                   │
-│  │ (agents) │  │ (tcp, discord,  │                   │
-│  │          │  │  matrix, irc)   │                   │
-│  └────┬─────┘  └───────┬─────────┘                   │
-│       │                │                             │
-├───────┴────────────────┴─────────────────────────────┤
-│  agent-channels (standalone library)                 │
-│                                                      │
-│  Channels, fan-out, groups, JSON messages            │
-│  Unix domain sockets, filesystem-based addressing    │
-└──────────────────────────────────────────────────────┘
+pi-channels/
+├── packages/
+│   ├── agent-channels/          # Standalone messaging library (zero pi coupling)
+│   │   └── src/
+│   │       ├── channel.ts       # Unix socket server, fan-out, history buffer
+│   │       ├── client.ts        # Socket client with autoReconnect
+│   │       ├── shared-channel.ts # Server-or-client with auto-failover
+│   │       ├── mesh.ts          # Multi-channel + DM API (IRC/Discord model)
+│   │       ├── group.ts         # Channel lifecycle management
+│   │       ├── message.ts       # { msg, data? } format
+│   │       ├── framing.ts       # Length-prefixed wire format
+│   │       ├── bridge.ts        # Bridge interface
+│   │       ├── bridges/tcp.ts   # TCP bridge
+│   │       └── util.ts          # allOrCleanup helper
+│   │
+│   └── pi-channels/             # Pi extension package
+│       ├── extensions/channels/
+│       │   ├── index.ts         # Extension entry point + lifecycle hooks
+│       │   ├── config.ts        # Config loading (global + project)
+│       │   ├── registry.ts      # Agent discovery (file-based)
+│       │   ├── reservations.ts  # File reservation enforcement
+│       │   ├── presence.ts      # Activity tracking + stuck detection
+│       │   ├── feed.ts          # Activity feed (JSONL)
+│       │   ├── names.ts         # Agent name generation
+│       │   ├── terminal.ts      # Terminal spawning
+│       │   ├── overlay.ts       # Chat overlay TUI
+│       │   ├── tool.ts          # pi_channels tool (16 actions)
+│       │   └── types.ts         # Shared types
+│       └── tests/
 ```
 
-Channels are sockets. The filesystem is the router. The protocol is just JSON.
+## Key Features
+
+- **Mesh networking**: Agents auto-discover each other via SharedChannels with leader election. No central server.
+- **Topic channels**: Join/leave named channels like Discord/IRC (`#general`, `#testing`, `#auth-review`).
+- **Direct messages**: DM any agent via their inbox socket.
+- **File reservations**: Claim files/dirs, get blocked on write conflicts with clear coordination messages.
+- **Terminal spawning**: Open new visible terminal windows running pi (tmux, kitty, iTerm, macOS Terminal, Linux).
+- **Stuck detection**: Agents idle with open reservations get flagged for peers.
+- **Chat overlay**: Ctrl+H opens an interactive TUI with channel filtering, DMs, and message history.
+- **Fun names**: Auto-generated names (CozyBadger, FrostyPenguin) from multiple themes.
 
 ## Quick Start
 
-### Use the pi extension
+1. Enable auto-registration in your project:
+   ```json
+   // .pi/channels.json
+   { "autoRegister": true }
+   ```
 
-```bash
-pi install git:github.com/Lemon9247/pi-channels/packages/pi-swarm
-```
+2. Start multiple pi sessions in the same project — they auto-discover and can communicate.
 
-Then in pi, use the `swarm` tool to spawn coordinated agents. See the [pi-swarm README](packages/pi-swarm/README.md) for details.
+3. Use the `pi_channels` tool:
+   ```
+   pi_channels({ action: "send", message: "auth module done" })
+   pi_channels({ action: "send", to: "FrostyPenguin", message: "can you review?" })
+   pi_channels({ action: "reserve", paths: ["src/auth/"], reason: "Refactoring" })
+   pi_channels({ action: "spawn", prompt: "Fix the failing tests" })
+   ```
 
-### Use the library standalone
+## Commands
 
-```typescript
-import { ChannelGroup, ChannelClient } from "agent-channels";
+- `/channels` — interactive menu
+- `/channels chat` — toggle chat overlay
+- `/channels status` — quick status
+- `/channels config` — show config
 
-const group = new ChannelGroup({
-    path: "/tmp/my-channels",
-    channels: [{ name: "general" }, { name: "alerts" }],
-});
-await group.start();
+## Config
 
-const client = new ChannelClient("/tmp/my-channels/general.sock");
-await client.connect();
-client.on("message", (msg) => console.log(msg));
-client.send({ msg: "hello", data: { from: "me" } });
-```
+Global: `~/.pi/agent/channels.json`  
+Project: `.pi/channels.json` (overrides global)
 
-See the [agent-channels README](packages/agent-channels/README.md) for the full API.
+| Key | Default | Description |
+|-----|---------|-------------|
+| `autoRegister` | `false` | Join mesh on session start |
+| `autoRegisterPaths` | `[]` | Folders/globs for auto-join |
+| `discovery` | `"project"` | `"project"` or `"global"` |
+| `nameTheme` | `"creatures"` | creatures/nature/space/minimal/classic/custom |
+| `chattiness` | `"normal"` | quiet/normal/verbose |
+| `stuckThreshold` | `900` | Seconds before stuck detection |
+| `terminal` | `"auto"` | Terminal for spawning |
 
 ## Development
 
 ```bash
-git clone git@github.com:Lemon9247/pi-channels.git
-cd pi-channels
 npm install
-npm run build      # Build agent-channels
-npm test           # Run all tests (150 total)
+npm test          # Run all tests (203 total)
+npm run test:lib  # agent-channels tests only
+npm run test:ext  # pi-channels extension tests only
 ```
 
-Individual test suites:
+## Philosophy
 
-```bash
-npm run test:channels   # agent-channels tests (103)
-npm run test:swarm      # pi-swarm tests (47)
-```
-
-This is an npm workspace — `agent-channels` is symlinked into `node_modules/` automatically. Changes to the library are immediately visible to pi-swarm without rebuilding.
-
-## Packages
-
-### agent-channels
-
-Standalone Node.js library. No pi dependency. No AI concepts. Just:
-
-- **Channel** — Unix socket server, fans out messages to all connected clients
-- **ChannelClient** — connects to a channel, sends and receives
-- **ChannelGroup** — directory of channels with lifecycle management
-- **Message** — `{ msg: string, data?: Record<string, unknown> }` — that's it
-- **TCP Bridge** — expose a channel over TCP for remote connections
-
-### pi-swarm
-
-Pi extension that uses channels to coordinate AI agent swarms:
-
-- **swarm** tool — spawn agents with channel groups (general + per-agent inboxes)
-- **hive_notify/blocker/done/progress** — agent coordination tools
-- **swarm_instruct/status** — queen management tools
-- **Live dashboard** — widget showing agent status, activity, progress
-- **Hive-mind** — shared markdown files for persistent coordination
-
-## License
-
-MIT
+- **Human as orchestrator** — no agents orchestrating other agents
+- **Every session is visible** — no hidden subagents, no `--mode json` workers
+- **Cooperative, not enforced** — reservations are cooperative, not locked
+- **Library stays general** — agent-channels has zero pi-specific logic

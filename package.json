@@ -1,19 +1,18 @@
 {
     "name": "pi-channels",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "private": true,
-    "description": "Channel-based messaging and multi-agent coordination for the pi coding agent",
-    "keywords": ["pi-package", "swarm", "multi-agent", "channels"],
+    "description": "Inter-session agent communication for the pi coding agent",
+    "keywords": ["pi-package", "channels", "multi-agent", "communication"],
     "workspaces": ["packages/*"],
     "scripts": {
         "build": "npm run build -w agent-channels",
-        "test:channels": "npm test -w agent-channels",
-        "test:swarm": "npx tsx --test packages/pi-swarm/extensions/swarm/tests/core/*.test.ts packages/pi-swarm/extensions/swarm/tests/integration/*.test.ts packages/pi-swarm/extensions/swarm/tests/tools/*.test.ts packages/pi-swarm/extensions/swarm/tests/ui/*.test.ts",
-        "test": "npm run test:channels && npm run test:swarm"
+        "test:lib": "npm test -w agent-channels",
+        "test:ext": "npm test -w pi-channels",
+        "test": "npm run test:lib && npm run test:ext"
     },
     "pi": {
-        "extensions": ["packages/pi-swarm/extensions"],
-        "skills": ["packages/pi-swarm/skills"]
+        "extensions": ["packages/pi-channels/extensions"]
     },
     "license": "MIT"
 }
