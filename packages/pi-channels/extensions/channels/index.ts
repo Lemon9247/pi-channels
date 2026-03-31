@@ -307,7 +307,7 @@ export default {
     async onToolCall(toolName: string, params: Record<string, unknown>): Promise<{ block: boolean; reason?: string } | undefined> {
         // Handle pi_channels tool calls
         if (toolName === "pi_channels") {
-            const result = await executeTool(params as ToolAction, {
+            const result = await executeTool(params as unknown as ToolAction, {
                 mesh,
                 config,
                 agentName,
