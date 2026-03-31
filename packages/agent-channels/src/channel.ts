@@ -10,6 +10,8 @@ export interface ChannelOptions {
     path: string;
     /** Whether to echo messages back to the sender. Default: false. */
     echoToSender?: boolean;
+    /** Number of recent messages to buffer and replay to newly connected clients. Default: 0 (disabled). */
+    historySize?: number;
 }
 
 interface ConnectedClient {
@@ -35,16 +37,19 @@ export class Channel extends EventEmitter {
     private static readonly MAX_QUEUE_SIZE = 1000;
     private readonly socketPath: string;
     private readonly echoToSender: boolean;
+    private readonly historySize: number;
     private server: net.Server | null = null;
     private clients: Map<string, ConnectedClient> = new Map();
     private _started = false;
     private nextClientId = 0;
     private messageQueue: Buffer[] = [];
+    private historyBuffer: Buffer[] = [];
 
     constructor(options: ChannelOptions) {
         super();
         this.socketPath = options.path;
         this.echoToSender = options.echoToSender ?? false;
+        this.historySize = options.historySize ?? 0;
     }
 
     /** Start listening on the Unix domain socket. */
@@ -133,6 +138,7 @@ export class Channel extends EventEmitter {
      */
     broadcast(msg: Message): void {
         const frame = encode(msg);
+        this.pushHistory(frame);
         if (this.clients.size === 0) {
             // Cap queue to prevent unbounded growth if client never connects
             if (this.messageQueue.length >= Channel.MAX_QUEUE_SIZE) {
@@ -156,6 +162,13 @@ export class Channel extends EventEmitter {
         this.clients.set(clientId, client);
         this.emit("connect", clientId);
 
+        // Replay history buffer to newly connected client
+        if (this.historySize > 0) {
+            for (const frame of this.historyBuffer) {
+                this.writeToClient(client, frame);
+            }
+        }
+
         // Flush queued messages to newly connected client
         if (this.messageQueue.length > 0) {
             for (const frame of this.messageQueue) {
@@ -177,6 +190,7 @@ export class Channel extends EventEmitter {
             for (const msg of messages) {
                 this.emit("message", msg, clientId);
                 this.fanOut(msg, clientId);
+                this.pushHistory(encode(msg));
             }
         });
 
@@ -276,6 +290,14 @@ export class Channel extends EventEmitter {
                 }
             });
         });
+    }
+
+    private pushHistory(frame: Buffer): void {
+        if (this.historySize <= 0) return;
+        this.historyBuffer.push(frame);
+        while (this.historyBuffer.length > this.historySize) {
+            this.historyBuffer.shift();
+        }
     }
 
     private unlinkSocket(): void {
