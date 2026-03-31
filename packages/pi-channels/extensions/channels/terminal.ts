@@ -44,7 +44,7 @@ function buildPiCommand(
     const cdPart = cwd ? `cd ${JSON.stringify(cwd)} && ` : "";
     // Escape the prompt for shell
     const escapedPrompt = prompt.replace(/'/g, "'\\''");
-    return `${cdPart}${envStr} pi -p '${escapedPrompt}'`;
+    return `${cdPart}${envStr} pi --append-system-prompt '${escapedPrompt}'`;
 }
 
 /**
@@ -70,8 +70,8 @@ export function spawnTerminal(options: {
             }
 
             case "kitty": {
-                const cmd = `kitty @ launch --type=os-window --title "pi" -- sh -c '${piCmd.replace(/'/g, "'\\''")}'`;
-                execSync(cmd, { stdio: "ignore" });
+                const cmd = `kitty -T "pi" sh -c '${piCmd.replace(/'/g, "'\\''")}'`;
+                execSync(cmd, { stdio: "ignore", detached: true });
                 return { success: true, command: cmd, terminal };
             }
 
