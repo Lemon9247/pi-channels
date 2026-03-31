@@ -10,13 +10,14 @@ import * as presence from "./presence.js";
 import * as feed from "./feed.js";
 import * as overlay from "./overlay.js";
 import { executeTool } from "./tool.js";
+import { ChannelsOverlay } from "./channels-overlay.js";
 import {
     type ChannelsConfig,
     type ToolAction,
     type RegistryEntry,
 } from "./types.js";
 
-// ─── Extension State ────────────────────────────────────────────────
+// --- Extension State ---
 
 let mesh: Mesh | null = null;
 let config: ChannelsConfig;
@@ -25,11 +26,12 @@ let projectDir = "";
 let overlayState = overlay.createOverlayState();
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let activityFlushTimer: ReturnType<typeof setTimeout> | null = null;
+let latestCtx: any = null;
 
 // Reference to the pi API (set once in the factory)
 let piApi: any = null;
 
-// ─── Helpers ────────────────────────────────────────────────────────
+// --- Helpers ---
 
 function folderHash(dir: string): string {
     return crypto.createHash("sha256").update(dir).digest("hex").slice(0, 12);
@@ -52,7 +54,28 @@ function getBranch(): string | undefined {
     }
 }
 
-// ─── Mesh Event Handlers ────────────────────────────────────────────
+// --- Status Bar ---
+
+function updateStatusBar(ctx?: any): void {
+    const c = ctx || latestCtx;
+    if (!c?.hasUI || !c?.ui?.setStatus) return;
+    if (!mesh || !agentName) {
+        c.ui.setStatus("channels", "");
+        return;
+    }
+
+    const peers = mesh.allMembers().filter((n: string) => n !== agentName).length;
+    const unread = overlay.getTotalUnread(overlayState);
+    const theme = c.ui.theme;
+
+    const nameStr = theme?.fg?.("accent", agentName) ?? agentName;
+    const countStr = theme?.fg?.("dim", ` (${peers} peer${peers === 1 ? "" : "s"})`) ?? ` (${peers} peers)`;
+    const unreadStr = unread > 0 ? (theme?.fg?.("accent", ` \u25cf${unread}`) ?? ` \u25cf${unread}`) : "";
+
+    c.ui.setStatus("channels", `ch: ${nameStr}${countStr}${unreadStr}`);
+}
+
+// --- Mesh Event Handlers ---
 
 function onMeshMessage(msg: Message, meta: MessageMeta): void {
     if (!piApi) return;
@@ -80,18 +103,21 @@ function onMeshMessage(msg: Message, meta: MessageMeta): void {
     };
     overlay.addMessage(overlayState, chatMsg);
 
+    // Update status bar to show unread
+    updateStatusBar();
+
     // Deliver to agent based on chattiness
     if (meta.from === agentName) return;
 
-    const content = `📨 [${meta.channel}] ${meta.from}: ${msg.msg}`;
+    const content = `**Message from ${meta.from}** [${meta.channel}]\n\n${msg.msg}`;
     if (config.chattiness === "quiet") {
         piApi.sendMessage(
-            { customType: "channels-message", content: [{ type: "text", text: content }], display: true },
+            { customType: "channels-message", content, display: true },
             { triggerTurn: false },
         );
     } else {
         piApi.sendMessage(
-            { customType: "channels-message", content: [{ type: "text", text: content }], display: true },
+            { customType: "channels-message", content, display: true },
             { triggerTurn: true, deliverAs: "steer" },
         );
     }
@@ -105,7 +131,7 @@ function onMeshJoin(name: string, channel: string): void {
         const branchInfo = entry?.branch ? ` on ${entry.branch}` : "";
         const modelInfo = entry?.model ? `, ${entry.model}` : "";
         piApi.sendMessage(
-            { customType: "channels-system", content: [{ type: "text", text: `📢 ${name} joined #${channel} (${projectDir}${branchInfo}${modelInfo})` }], display: true },
+            { customType: "channels-system", content: `${name} joined #${channel} (${projectDir}${branchInfo}${modelInfo})`, display: false },
             { triggerTurn: false },
         );
     }
@@ -113,10 +139,12 @@ function onMeshJoin(name: string, channel: string): void {
     overlay.addMessage(overlayState, {
         timestamp: new Date(),
         from: "system",
-        text: `📢 ${name} joined`,
+        text: `${name} joined #${channel}`,
         channel,
         isDM: false,
     });
+
+    updateStatusBar();
 }
 
 function onMeshLeave(name: string, channel: string): void {
@@ -124,7 +152,7 @@ function onMeshLeave(name: string, channel: string): void {
 
     if (config.chattiness !== "quiet") {
         piApi.sendMessage(
-            { customType: "channels-system", content: [{ type: "text", text: `📢 ${name} left #${channel}` }], display: true },
+            { customType: "channels-system", content: `${name} left #${channel}`, display: false },
             { triggerTurn: false },
         );
     }
@@ -134,21 +162,19 @@ function onMeshLeave(name: string, channel: string): void {
     overlay.addMessage(overlayState, {
         timestamp: new Date(),
         from: "system",
-        text: `📢 ${name} left`,
+        text: `${name} left #${channel}`,
         channel,
         isDM: false,
     });
+
+    updateStatusBar();
 }
 
-// ─── Mesh Connection ────────────────────────────────────────────────
+// --- Mesh Connection ---
 
-/**
- * Connect to the mesh. Can be called from initSession (auto) or
- * from the tool's "connect" action (manual).
- */
 async function connectToMesh(model?: string): Promise<string> {
     if (mesh) return `Already connected as ${agentName}.`;
-    if (!projectDir) return "❌ No project directory set.";
+    if (!projectDir) return "No project directory set.";
 
     // Determine agent name
     agentName = process.env.PI_AGENT_NAME
@@ -169,7 +195,7 @@ async function connectToMesh(model?: string): Promise<string> {
     mesh.on("error", (err: Error) => {
         if (piApi) {
             piApi.sendMessage(
-                { customType: "channels-system", content: [{ type: "text", text: `⚠️ Channels error: ${err.message}` }], display: true },
+                { customType: "channels-system", content: `Channels error: ${err.message}`, display: false },
                 { triggerTurn: false },
             );
         }
@@ -215,16 +241,18 @@ async function connectToMesh(model?: string): Promise<string> {
         const spawner = process.env.PI_CHANNELS_SPAWNED_BY;
         const spawnNote = spawner ? ` (spawned by ${spawner})` : "";
         piApi.sendMessage(
-            { customType: "channels-system", content: [{ type: "text", text: `🐾 Registered as ${agentName}${spawnNote} — ${mesh.allMembers().length} agents in mesh` }], display: true },
+            { customType: "channels-system", content: `Registered as ${agentName}${spawnNote} \u2014 ${mesh.allMembers().length} agents in mesh`, display: false },
             { triggerTurn: false },
         );
     }
 
+    updateStatusBar();
+
     const peers = mesh.allMembers().length;
-    return `✅ Connected as ${agentName} — ${peers} agent(s) in mesh`;
+    return `Connected as ${agentName} \u2014 ${peers} agent(s) in mesh`;
 }
 
-// ─── Session Init ───────────────────────────────────────────────────
+// --- Session Init ---
 
 async function initSession(cwd: string, model?: string): Promise<void> {
     projectDir = cwd;
@@ -234,7 +262,7 @@ async function initSession(cwd: string, model?: string): Promise<void> {
     const cleaned = registry.cleanupStaleEntries();
     if (cleaned.length > 0 && config.chattiness === "verbose" && piApi) {
         piApi.sendMessage(
-            { customType: "channels-system", content: [{ type: "text", text: `🧹 Cleaned ${cleaned.length} stale agent entries: ${cleaned.join(", ")}` }], display: true },
+            { customType: "channels-system", content: `Cleaned ${cleaned.length} stale agent entries: ${cleaned.join(", ")}`, display: false },
             { triggerTurn: false },
         );
     }
@@ -248,7 +276,7 @@ async function initSession(cwd: string, model?: string): Promise<void> {
     await connectToMesh(model);
 }
 
-// ─── Session Shutdown ───────────────────────────────────────────────
+// --- Session Shutdown ---
 
 async function shutdownSession(): Promise<void> {
     if (heartbeatTimer) {
@@ -273,27 +301,25 @@ async function shutdownSession(): Promise<void> {
     reservations.clearAllReservations();
 }
 
-// ─── Extension Factory (pi API) ─────────────────────────────────────
+// --- Extension Factory (pi API) ---
 
 export default function channelsExtension(pi: any): void {
     piApi = pi;
 
-    // ── Tool Registration ────────────────────────────────────────
+    // -- Tool Registration --
 
-    // We use a plain object schema since we don't want to depend on TypeBox
-    // at this level. Pi accepts any JSON Schema-compatible object.
     pi.registerTool({
         name: "pi_channels",
         label: "Channels",
         description:
-            "Communicate with other pi sessions. Actions: join, leave, send, list, status, whois, channels, feed, reserve, release, spawn, set_status, rename, config.show, config.set",
+            "Communicate with other pi sessions. Actions: connect, join, leave, send, list, status, whois, channels, feed, reserve, release, spawn, set_status, rename, config.show, config.set",
         parameters: {
             type: "object",
             properties: {
                 action: {
                     type: "string",
                     description:
-                        "Action to perform: join | leave | send | list | status | whois | channels | feed | reserve | release | spawn | set_status | rename | config.show | config.set",
+                        "Action to perform: connect | join | leave | send | list | status | whois | channels | feed | reserve | release | spawn | set_status | rename | config.show | config.set",
                 },
                 channel: {
                     type: "string",
@@ -355,11 +381,13 @@ export default function channelsExtension(pi: any): void {
             _onUpdate: any,
             ctx: any,
         ) {
+            latestCtx = ctx;
             const result = await executeTool(params as ToolAction, {
                 mesh,
                 config,
                 agentName,
                 projectDir,
+                connectToMesh,
             });
             return {
                 content: [{ type: "text", text: result }],
@@ -368,205 +396,67 @@ export default function channelsExtension(pi: any): void {
         },
     });
 
-    // ── Command Registration ─────────────────────────────────────
+    // -- Overlay helper --
+
+    async function openChannelsOverlay(ctx: any): Promise<void> {
+        if (!ctx?.hasUI || !ctx?.ui?.custom) return;
+
+        // Auto-connect if not registered
+        if (!mesh) {
+            await connectToMesh();
+        }
+
+        await ctx.ui.custom(
+            (tui: any, theme: any, _keybindings: any, done: any) => {
+                return new ChannelsOverlay(tui, theme, {
+                    mesh,
+                    config,
+                    agentName,
+                    projectDir,
+                    overlayState,
+                    connectToMesh,
+                });
+            },
+            { overlay: true },
+        );
+
+        // After overlay closes, update status
+        updateStatusBar(ctx);
+    }
+
+    // -- Command Registration --
 
     pi.registerCommand("channels", {
-        description: "Manage agent channels interactively",
+        description: "Open channels overlay",
         async handler(_args: string, ctx: any) {
-            const action = await ctx.ui.select("📡 Channels", [
-                ...(mesh ? [] : ["Connect to Mesh"]),
-                "View Status",
-                "List Agents",
-                "Join Channel",
-                "Leave Channel",
-                "Send Message",
-                "Activity Feed",
-                "Toggle Chat Overlay",
-                "Spawn Agent",
-                "Config",
-            ]);
-
-            if (!action) return;
-
-            const toolCtx = { mesh, config, agentName, projectDir, connectToMesh };
-
-            switch (action) {
-                case "Connect to Mesh": {
-                    const result = await connectToMesh();
-                    ctx.ui.notify(result, "info");
-                    break;
-                }
-
-                case "View Status": {
-                    if (!mesh) {
-                        ctx.ui.notify("❌ Not connected to mesh.", "error");
-                        return;
-                    }
-                    const result = await executeTool({ action: "status" }, toolCtx);
-                    ctx.ui.notify(result, "info");
-                    break;
-                }
-
-                case "List Agents": {
-                    const result = await executeTool({ action: "list" }, toolCtx);
-                    ctx.ui.notify(result, "info");
-                    break;
-                }
-
-                case "Join Channel": {
-                    if (!mesh) {
-                        ctx.ui.notify("❌ Not connected to mesh. Connect first.", "error");
-                        return;
-                    }
-                    const channel = await ctx.ui.input("Join Channel", "Enter channel name to join");
-                    if (!channel) return;
-                    const result = await executeTool({ action: "join", channel }, toolCtx);
-                    ctx.ui.notify(result, "info");
-                    break;
-                }
-
-                case "Leave Channel": {
-                    if (!mesh) {
-                        ctx.ui.notify("❌ Not connected to mesh.", "error");
-                        return;
-                    }
-                    const channels = mesh.channels.filter((c: string) => c !== "general");
-                    if (channels.length === 0) {
-                        ctx.ui.notify("No channels to leave (cannot leave #general).", "info");
-                        return;
-                    }
-                    const channel = await ctx.ui.select("Leave Channel", channels);
-                    if (!channel) return;
-                    const result = await executeTool({ action: "leave", channel }, toolCtx);
-                    ctx.ui.notify(result, "info");
-                    break;
-                }
-
-                case "Send Message": {
-                    if (!mesh) {
-                        ctx.ui.notify("❌ Not connected to mesh.", "error");
-                        return;
-                    }
-                    const target = await ctx.ui.select("Send To", [
-                        ...mesh.channels.map((c: string) => `#${c}`),
-                        ...mesh.allMembers().filter((n: string) => n !== agentName).map((n: string) => `@${n} (DM)`),
-                    ]);
-                    if (!target) return;
-
-                    const message = await ctx.ui.input("Message", `Send to ${target}`);
-                    if (!message) return;
-
-                    if (target.startsWith("@")) {
-                        const to = target.replace(/^@/, "").replace(/ \(DM\)$/, "");
-                        const result = await executeTool({ action: "send", to, message }, toolCtx);
-                        ctx.ui.notify(result, "info");
-                    } else {
-                        const channel = target.replace(/^#/, "");
-                        const result = await executeTool({ action: "send", channel, message }, toolCtx);
-                        ctx.ui.notify(result, "info");
-                    }
-                    break;
-                }
-
-                case "Activity Feed": {
-                    const result = await executeTool({ action: "feed", limit: 20 }, toolCtx);
-                    ctx.ui.notify(result, "info");
-                    break;
-                }
-
-                case "Toggle Chat Overlay": {
-                    overlayState.visible = !overlayState.visible;
-                    if (overlayState.visible) {
-                        overlay.clearFocusedUnread(overlayState);
-                    }
-                    ctx.ui.notify(
-                        overlayState.visible ? "Chat overlay opened (Ctrl+H to close)" : "Chat overlay closed",
-                        "info",
-                    );
-                    break;
-                }
-
-                case "Spawn Agent": {
-                    const prompt = await ctx.ui.input("Spawn Agent", "Enter the prompt/instructions for the new agent");
-                    if (!prompt) return;
-
-                    const joinChannels = await ctx.ui.input("Channels", "Channels to auto-join (comma-separated, or leave empty for general)");
-                    const channelList = joinChannels
-                        ? joinChannels.split(",").map((c: string) => c.trim()).filter(Boolean)
-                        : undefined;
-
-                    const result = await executeTool(
-                        { action: "spawn", prompt, channels: channelList },
-                        toolCtx,
-                    );
-                    ctx.ui.notify(result, "info");
-                    break;
-                }
-
-                case "Config": {
-                    const configAction = await ctx.ui.select("Config", [
-                        "View Config",
-                        "Edit Setting",
-                    ]);
-                    if (!configAction) return;
-
-                    if (configAction === "View Config") {
-                        const result = await executeTool({ action: "config.show" }, toolCtx);
-                        ctx.ui.notify(result, "info");
-                    } else {
-                        const key = await ctx.ui.select("Select Setting", Object.keys(config));
-                        if (!key) return;
-                        const currentVal = (config as any)[key];
-                        const value = await ctx.ui.input(
-                            `Set ${key}`,
-                            `Current: ${JSON.stringify(currentVal)}. Enter new value`,
-                        );
-                        if (value === null || value === undefined) return;
-
-                        // Parse booleans and numbers
-                        let parsed: unknown = value;
-                        if (value === "true") parsed = true;
-                        else if (value === "false") parsed = false;
-                        else if (!isNaN(Number(value)) && value !== "") parsed = Number(value);
-
-                        const result = await executeTool(
-                            { action: "config.set", key, value: parsed },
-                            toolCtx,
-                        );
-                        config = loadConfig(projectDir);
-                        ctx.ui.notify(result, "info");
-                    }
-                    break;
-                }
-            }
+            await openChannelsOverlay(ctx);
         },
     });
 
-    // ── Keyboard Shortcut ────────────────────────────────────────
+    // -- Keyboard Shortcut --
 
     pi.registerShortcut("ctrl+h", {
-        description: "Toggle channels chat overlay",
+        description: "Open channels overlay",
         handler: (ctx: any) => {
-            overlayState.visible = !overlayState.visible;
-            if (overlayState.visible) {
-                overlay.clearFocusedUnread(overlayState);
-            }
+            openChannelsOverlay(ctx);
         },
     });
 
-    // ── Lifecycle Events ─────────────────────────────────────────
+    // -- Lifecycle Events --
 
     pi.on("session_start", async (_event: any, ctx: any) => {
+        latestCtx = ctx;
         const cwd = ctx.cwd;
         const model = ctx.model?.name;
         await initSession(cwd, model);
+        updateStatusBar(ctx);
     });
 
     pi.on("session_shutdown", async () => {
         await shutdownSession();
     });
 
-    // ── Tool Call Hook (reservation enforcement) ─────────────────
+    // -- Tool Call Hook (reservation enforcement) --
 
     pi.on("tool_call", (event: any, _ctx: any) => {
         // Track activity
@@ -596,9 +486,10 @@ export default function channelsExtension(pi: any): void {
         return undefined;
     });
 
-    // ── Tool Result Hook (activity tracking) ─────────────────────
+    // -- Tool Result Hook (activity tracking) --
 
-    pi.on("tool_result", (event: any, _ctx: any) => {
+    pi.on("tool_result", (event: any, ctx: any) => {
+        latestCtx = ctx;
         presence.clearActivity();
 
         // Debounced activity flush
@@ -613,38 +504,26 @@ export default function channelsExtension(pi: any): void {
         if (config?.chattiness === "verbose" && mesh && presence.canSendAutoStatus()) {
             const toolCount = presence.getToolCount();
             if (toolCount > 10 && event.toolName === "edit") {
-                mesh.send(`🔥 ${agentName} is on fire (${toolCount} edits this session)`);
+                mesh.send(`${agentName} is on fire (${toolCount} edits this session)`);
             }
         }
     });
 
-    // ── Turn End Hook (stuck detection) ──────────────────────────
+    // -- Turn End Hook (stuck detection + status) --
 
-    pi.on("turn_end", () => {
+    pi.on("turn_end", (_event: any, ctx: any) => {
+        latestCtx = ctx;
+
         if (mesh && config?.stuckNotify) {
             const stuck = presence.checkStuckAgents(agentName, config);
             for (const s of stuck) {
-                piApi.sendMessage(
-                    { customType: "channels-system", content: [{ type: "text", text: `⚠️ ${s.name} appears stuck (${s.reason})` }], display: true },
-                    { triggerTurn: false },
-                );
+                if (ctx?.hasUI) {
+                    ctx.ui.notify(`${s.name} appears stuck (${s.reason})`, "warning");
+                }
             }
         }
 
         // Update status bar
-        if (config?.showWidget && mesh && agentName) {
-            const peers = mesh.allMembers().filter((n: string) => n !== agentName).length;
-            if (peers > 0) {
-                const unread = overlay.getTotalUnread(overlayState);
-                const statusText = overlay.renderStatusBar(agentName, peers, unread);
-                try {
-                    piApi.sendMessage(
-                        { customType: "channels-status", content: [{ type: "text", text: statusText }], display: false },
-                    );
-                } catch {
-                    // Status bar display is best-effort
-                }
-            }
-        }
+        updateStatusBar(ctx);
     });
 }
