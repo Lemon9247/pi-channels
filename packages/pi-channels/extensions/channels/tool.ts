@@ -14,14 +14,14 @@ import { loadConfig, saveConfigValue } from "./config.js";
 export const toolDefinition = {
     name: "pi_channels",
     description:
-        "Communicate with other pi sessions. Actions: join, leave, send, list, status, whois, channels, feed, reserve, release, spawn, set_status, rename, config.show, config.set",
+        "Communicate with other pi sessions. Actions: connect, join, leave, send, list, status, whois, channels, feed, reserve, release, spawn, set_status, rename, config.show, config.set",
     parameters: {
         type: "object" as const,
         properties: {
             action: {
                 type: "string",
                 description:
-                    "Action to perform: join | leave | send | list | status | whois | channels | feed | reserve | release | spawn | set_status | rename | config.show | config.set",
+                    "Action to perform: connect | join | leave | send | list | status | whois | channels | feed | reserve | release | spawn | set_status | rename | config.show | config.set",
             },
             channel: {
                 type: "string",
@@ -87,6 +87,7 @@ export async function executeTool(
         config: ChannelsConfig;
         agentName: string;
         projectDir: string;
+        connectToMesh?: () => Promise<string>;
     },
 ): Promise<string> {
     const { mesh, config, agentName, projectDir } = context;
@@ -94,8 +95,23 @@ export async function executeTool(
     switch (params.action) {
         // ─── Coordination ────────────────────────────────────────
 
+        case "connect": {
+            if (mesh) return `Already connected as ${agentName}.`;
+            if (!context.connectToMesh) return "❌ Connect not available. Try reloading the extension.";
+            return await context.connectToMesh();
+        }
+
         case "join": {
-            if (!mesh) return "❌ Not connected to mesh. Enable autoRegister or join manually.";
+            if (!mesh) {
+                if (context.connectToMesh) {
+                    const result = await context.connectToMesh();
+                    // Re-read mesh from context after connecting — but since mesh is
+                    // a module-level var in index.ts, we need to proceed with the
+                    // channel join in the next call. Return connect result + hint.
+                    return result + (params.channel ? `\nNow use join again to join #${params.channel}.` : "");
+                }
+                return "❌ Not connected to mesh. Use connect action first.";
+            }
 
             if (params.channel) {
                 await mesh.join(params.channel);
@@ -114,7 +130,7 @@ export async function executeTool(
         }
 
         case "leave": {
-            if (!mesh) return "❌ Not connected to mesh.";
+            if (!mesh) return "❌ Not connected to mesh. Use connect action or /channels command to connect.";
 
             if (params.channel) {
                 if (params.channel === "general") {
@@ -130,7 +146,7 @@ export async function executeTool(
         }
 
         case "channels": {
-            if (!mesh) return "❌ Not connected to mesh.";
+            if (!mesh) return "❌ Not connected to mesh. Use connect action or /channels command to connect.";
 
             const lines = mesh.channels.map((ch) => {
                 const members = mesh.channelMembers(ch);
@@ -153,7 +169,7 @@ export async function executeTool(
         }
 
         case "status": {
-            if (!mesh) return "❌ Not connected to mesh.";
+            if (!mesh) return "❌ Not connected to mesh. Use connect action or /channels command to connect.";
             const myEntry = registry.getAgent(agentName);
             const peers = mesh.allMembers().filter((n) => n !== agentName);
             const resCount = myEntry?.reservations?.length ?? 0;
@@ -202,7 +218,7 @@ export async function executeTool(
         // ─── Messaging ──────────────────────────────────────────
 
         case "send": {
-            if (!mesh) return "❌ Not connected to mesh.";
+            if (!mesh) return "❌ Not connected to mesh. Use connect action or /channels command to connect.";
             if (!params.message) return "❌ Specify a message.";
 
             if (params.to) {
@@ -224,7 +240,7 @@ export async function executeTool(
         }
 
         case "set_status": {
-            if (!mesh) return "❌ Not connected to mesh.";
+            if (!mesh) return "❌ Not connected to mesh. Use connect action or /channels command to connect.";
             if (!params.message) return "❌ Specify a status message.";
 
             mesh.send(`📋 ${agentName}: ${params.message}`);
@@ -234,7 +250,7 @@ export async function executeTool(
         // ─── Reservations ────────────────────────────────────────
 
         case "reserve": {
-            if (!mesh) return "❌ Not connected to mesh.";
+            if (!mesh) return "❌ Not connected to mesh. Use connect action or /channels command to connect.";
             if (!params.paths?.length) return "❌ Specify paths to reserve.";
 
             // Check for conflicts first
@@ -266,7 +282,7 @@ export async function executeTool(
         }
 
         case "release": {
-            if (!mesh) return "❌ Not connected to mesh.";
+            if (!mesh) return "❌ Not connected to mesh. Use connect action or /channels command to connect.";
 
             const released = reservations.releaseReservation(agentName, params.paths);
             if (released.length === 0) return "No matching reservations to release.";
@@ -356,6 +372,6 @@ export async function executeTool(
         }
 
         default:
-            return `❌ Unknown action: ${params.action}. Valid: join, leave, send, list, status, whois, channels, feed, reserve, release, spawn, set_status, rename, config.show, config.set`;
+            return `❌ Unknown action: ${params.action}. Valid: connect, join, leave, send, list, status, whois, channels, feed, reserve, release, spawn, set_status, rename, config.show, config.set`;
     }
 }

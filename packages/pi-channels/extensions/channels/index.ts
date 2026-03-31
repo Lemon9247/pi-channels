@@ -140,26 +140,15 @@ function onMeshLeave(name: string, channel: string): void {
     });
 }
 
-// ─── Session Init ───────────────────────────────────────────────────
+// ─── Mesh Connection ────────────────────────────────────────────────
 
-async function initSession(cwd: string, model?: string): Promise<void> {
-    projectDir = cwd;
-    config = loadConfig(projectDir);
-
-    // Clean up stale registry entries
-    const cleaned = registry.cleanupStaleEntries();
-    if (cleaned.length > 0 && config.chattiness === "verbose" && piApi) {
-        piApi.sendMessage(
-            { customType: "channels-system", content: [{ type: "text", text: `🧹 Cleaned ${cleaned.length} stale agent entries: ${cleaned.join(", ")}` }], display: true },
-            { triggerTurn: false },
-        );
-    }
-
-    // Prune activity feed
-    feed.pruneEvents(projectDir, config.feedRetention);
-
-    // Check if we should auto-register
-    if (!shouldAutoRegister(config, projectDir)) return;
+/**
+ * Connect to the mesh. Can be called from initSession (auto) or
+ * from the tool's "connect" action (manual).
+ */
+async function connectToMesh(model?: string): Promise<string> {
+    if (mesh) return `Already connected as ${agentName}.`;
+    if (!projectDir) return "❌ No project directory set.";
 
     // Determine agent name
     agentName = process.env.PI_AGENT_NAME
@@ -230,6 +219,33 @@ async function initSession(cwd: string, model?: string): Promise<void> {
             { triggerTurn: false },
         );
     }
+
+    const peers = mesh.allMembers().length;
+    return `✅ Connected as ${agentName} — ${peers} agent(s) in mesh`;
+}
+
+// ─── Session Init ───────────────────────────────────────────────────
+
+async function initSession(cwd: string, model?: string): Promise<void> {
+    projectDir = cwd;
+    config = loadConfig(projectDir);
+
+    // Clean up stale registry entries
+    const cleaned = registry.cleanupStaleEntries();
+    if (cleaned.length > 0 && config.chattiness === "verbose" && piApi) {
+        piApi.sendMessage(
+            { customType: "channels-system", content: [{ type: "text", text: `🧹 Cleaned ${cleaned.length} stale agent entries: ${cleaned.join(", ")}` }], display: true },
+            { triggerTurn: false },
+        );
+    }
+
+    // Prune activity feed
+    feed.pruneEvents(projectDir, config.feedRetention);
+
+    // Check if we should auto-register
+    if (!shouldAutoRegister(config, projectDir)) return;
+
+    await connectToMesh(model);
 }
 
 // ─── Session Shutdown ───────────────────────────────────────────────
@@ -355,12 +371,110 @@ export default function channelsExtension(pi: any): void {
     // ── Command Registration ─────────────────────────────────────
 
     pi.registerCommand("channels", {
-        description: "Manage agent channels (chat | status | config)",
-        async handler(args: string, ctx: any) {
-            const subcommand = args.trim();
+        description: "Manage agent channels interactively",
+        async handler(_args: string, ctx: any) {
+            const action = await ctx.ui.select("📡 Channels", [
+                ...(mesh ? [] : ["Connect to Mesh"]),
+                "View Status",
+                "List Agents",
+                "Join Channel",
+                "Leave Channel",
+                "Send Message",
+                "Activity Feed",
+                "Toggle Chat Overlay",
+                "Spawn Agent",
+                "Config",
+            ]);
 
-            switch (subcommand) {
-                case "chat":
+            if (!action) return;
+
+            const toolCtx = { mesh, config, agentName, projectDir, connectToMesh };
+
+            switch (action) {
+                case "Connect to Mesh": {
+                    const result = await connectToMesh();
+                    ctx.ui.notify(result, "info");
+                    break;
+                }
+
+                case "View Status": {
+                    if (!mesh) {
+                        ctx.ui.notify("❌ Not connected to mesh.", "error");
+                        return;
+                    }
+                    const result = await executeTool({ action: "status" }, toolCtx);
+                    ctx.ui.notify(result, "info");
+                    break;
+                }
+
+                case "List Agents": {
+                    const result = await executeTool({ action: "list" }, toolCtx);
+                    ctx.ui.notify(result, "info");
+                    break;
+                }
+
+                case "Join Channel": {
+                    if (!mesh) {
+                        ctx.ui.notify("❌ Not connected to mesh. Connect first.", "error");
+                        return;
+                    }
+                    const channel = await ctx.ui.input("Join Channel", "Enter channel name to join");
+                    if (!channel) return;
+                    const result = await executeTool({ action: "join", channel }, toolCtx);
+                    ctx.ui.notify(result, "info");
+                    break;
+                }
+
+                case "Leave Channel": {
+                    if (!mesh) {
+                        ctx.ui.notify("❌ Not connected to mesh.", "error");
+                        return;
+                    }
+                    const channels = mesh.channels.filter((c: string) => c !== "general");
+                    if (channels.length === 0) {
+                        ctx.ui.notify("No channels to leave (cannot leave #general).", "info");
+                        return;
+                    }
+                    const channel = await ctx.ui.select("Leave Channel", channels);
+                    if (!channel) return;
+                    const result = await executeTool({ action: "leave", channel }, toolCtx);
+                    ctx.ui.notify(result, "info");
+                    break;
+                }
+
+                case "Send Message": {
+                    if (!mesh) {
+                        ctx.ui.notify("❌ Not connected to mesh.", "error");
+                        return;
+                    }
+                    const target = await ctx.ui.select("Send To", [
+                        ...mesh.channels.map((c: string) => `#${c}`),
+                        ...mesh.allMembers().filter((n: string) => n !== agentName).map((n: string) => `@${n} (DM)`),
+                    ]);
+                    if (!target) return;
+
+                    const message = await ctx.ui.input("Message", `Send to ${target}`);
+                    if (!message) return;
+
+                    if (target.startsWith("@")) {
+                        const to = target.replace(/^@/, "").replace(/ \(DM\)$/, "");
+                        const result = await executeTool({ action: "send", to, message }, toolCtx);
+                        ctx.ui.notify(result, "info");
+                    } else {
+                        const channel = target.replace(/^#/, "");
+                        const result = await executeTool({ action: "send", channel, message }, toolCtx);
+                        ctx.ui.notify(result, "info");
+                    }
+                    break;
+                }
+
+                case "Activity Feed": {
+                    const result = await executeTool({ action: "feed", limit: 20 }, toolCtx);
+                    ctx.ui.notify(result, "info");
+                    break;
+                }
+
+                case "Toggle Chat Overlay": {
                     overlayState.visible = !overlayState.visible;
                     if (overlayState.visible) {
                         overlay.clearFocusedUnread(overlayState);
@@ -370,32 +484,58 @@ export default function channelsExtension(pi: any): void {
                         "info",
                     );
                     break;
+                }
 
-                case "status": {
-                    const result = await executeTool({ action: "status" }, { mesh, config, agentName, projectDir });
+                case "Spawn Agent": {
+                    const prompt = await ctx.ui.input("Spawn Agent", "Enter the prompt/instructions for the new agent");
+                    if (!prompt) return;
+
+                    const joinChannels = await ctx.ui.input("Channels", "Channels to auto-join (comma-separated, or leave empty for general)");
+                    const channelList = joinChannels
+                        ? joinChannels.split(",").map((c: string) => c.trim()).filter(Boolean)
+                        : undefined;
+
+                    const result = await executeTool(
+                        { action: "spawn", prompt, channels: channelList },
+                        toolCtx,
+                    );
                     ctx.ui.notify(result, "info");
                     break;
                 }
 
-                case "config": {
-                    const result = await executeTool({ action: "config.show" }, { mesh, config, agentName, projectDir });
-                    ctx.ui.notify(result, "info");
-                    break;
-                }
+                case "Config": {
+                    const configAction = await ctx.ui.select("Config", [
+                        "View Config",
+                        "Edit Setting",
+                    ]);
+                    if (!configAction) return;
 
-                default: {
-                    const info = [
-                        "📡 Channels",
-                        "",
-                        "  /channels chat     — toggle chat overlay",
-                        "  /channels status   — show status",
-                        "  /channels config   — show config",
-                        "",
-                        `  Agent: ${agentName || "not registered"}`,
-                        mesh ? `  Channels: ${mesh.channels.map((c: string) => `#${c}`).join(", ")}` : "  Not connected",
-                        `  Peers: ${mesh ? mesh.allMembers().filter((n: string) => n !== agentName).join(", ") || "none" : "none"}`,
-                    ].join("\n");
-                    ctx.ui.notify(info, "info");
+                    if (configAction === "View Config") {
+                        const result = await executeTool({ action: "config.show" }, toolCtx);
+                        ctx.ui.notify(result, "info");
+                    } else {
+                        const key = await ctx.ui.select("Select Setting", Object.keys(config));
+                        if (!key) return;
+                        const currentVal = (config as any)[key];
+                        const value = await ctx.ui.input(
+                            `Set ${key}`,
+                            `Current: ${JSON.stringify(currentVal)}. Enter new value`,
+                        );
+                        if (value === null || value === undefined) return;
+
+                        // Parse booleans and numbers
+                        let parsed: unknown = value;
+                        if (value === "true") parsed = true;
+                        else if (value === "false") parsed = false;
+                        else if (!isNaN(Number(value)) && value !== "") parsed = Number(value);
+
+                        const result = await executeTool(
+                            { action: "config.set", key, value: parsed },
+                            toolCtx,
+                        );
+                        config = loadConfig(projectDir);
+                        ctx.ui.notify(result, "info");
+                    }
                     break;
                 }
             }
