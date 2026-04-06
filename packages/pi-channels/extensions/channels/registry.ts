@@ -79,6 +79,18 @@ export function listAgents(): RegistryEntry[] {
 }
 
 /**
+ * List all registered agents for a specific project folder.
+ * Agents are visible if their cwd is the same folder or a subfolder of the projectDir.
+ */
+export function listAgentsForProject(projectDir: string): RegistryEntry[] {
+    const all = listAgents();
+    return all.filter((agent) => {
+        // Agent is visible if their cwd is the same as or under projectDir
+        return agent.cwd === projectDir || agent.cwd.startsWith(projectDir + "/");
+    });
+}
+
+/**
  * Get the set of all currently registered names.
  */
 export function registeredNames(): Set<string> {

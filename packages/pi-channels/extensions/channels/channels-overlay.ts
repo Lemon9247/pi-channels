@@ -369,7 +369,7 @@ export class ChannelsOverlay {
 
     private renderAgentsTab(w: number, maxLines: number): string[] {
         const lines: string[] = [];
-        const agents = registry.listAgents();
+        const agents = registry.listAgentsForProject(this.ctx.projectDir);
 
         if (!this.ctx.mesh) {
             lines.push(this.theme.fg("dim", "Not connected to mesh."));

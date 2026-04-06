@@ -82,11 +82,12 @@ export function flushActivityToRegistry(name: string, config: ChannelsConfig): v
 export function checkStuckAgents(
     myName: string,
     config: ChannelsConfig,
+    projectDir: string,
 ): Array<{ name: string; idleMinutes: number; reason: string }> {
     if (!config.stuckNotify) return [];
 
     const stuck: Array<{ name: string; idleMinutes: number; reason: string }> = [];
-    const agents = registry.listAgents();
+    const agents = registry.listAgentsForProject(projectDir);
 
     for (const agent of agents) {
         if (agent.name === myName) continue;

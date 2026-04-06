@@ -156,7 +156,7 @@ export async function executeTool(
         }
 
         case "list": {
-            const agents = registry.listAgents();
+            const agents = registry.listAgentsForProject(projectDir);
             if (agents.length === 0) return "No agents registered.";
 
             const lines = agents.map((a) => {

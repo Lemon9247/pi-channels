@@ -454,7 +454,7 @@ export default function channelsExtension(pi: any): void {
 
             switch (action) {
                 case "View Agents": {
-                    const agents = registry.listAgents();
+                    const agents = registry.listAgentsForProject(projectDir);
                     if (agents.length === 0) {
                         ctx.ui.notify("No agents registered", "info");
                         return;
@@ -642,7 +642,7 @@ export default function channelsExtension(pi: any): void {
         latestCtx = ctx;
 
         if (mesh && config?.stuckNotify) {
-            const stuck = presence.checkStuckAgents(agentName, config);
+            const stuck = presence.checkStuckAgents(agentName, config, projectDir);
             for (const s of stuck) {
                 if (ctx?.hasUI) {
                     ctx.ui.notify(`${s.name} appears stuck (${s.reason})`, "warning");
