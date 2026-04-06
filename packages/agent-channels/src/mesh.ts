@@ -126,6 +126,13 @@ export class Mesh extends EventEmitter {
      * Send a message to a channel (default: general).
      */
     send(message: string, options?: { channel?: string }): void {
+        return this.sendAs(this._name, message, options);
+    }
+
+    /**
+     * Send a message as a specific sender (for human messages from overlay).
+     */
+    sendAs(sender: string, message: string, options?: { channel?: string }): void {
         const channelName = options?.channel ?? "general";
         const sc = this.sharedChannels.get(channelName);
         if (!sc) {
@@ -133,7 +140,7 @@ export class Mesh extends EventEmitter {
         }
         sc.send({
             msg: message,
-            data: { type: "chat", from: this._name, channel: channelName },
+            data: { type: "chat", from: sender, channel: channelName },
         });
     }
 
@@ -141,13 +148,20 @@ export class Mesh extends EventEmitter {
      * Send a DM to a specific agent via their inbox socket.
      */
     async sendTo(target: string, message: string): Promise<void> {
+        return this.sendToAs(this._name, target, message);
+    }
+
+    /**
+     * Send a DM as a specific sender.
+     */
+    async sendToAs(sender: string, target: string, message: string): Promise<void> {
         const inboxPath = path.join(this.dir, `inbox-${target}.sock`);
         const client = new ChannelClient(inboxPath);
         try {
             await client.connect();
             client.send({
                 msg: message,
-                data: { type: "dm", from: this._name, to: target },
+                data: { type: "dm", from: sender, to: target },
             });
             // Small delay to ensure message is sent before disconnect
             await new Promise((r) => setTimeout(r, 50));

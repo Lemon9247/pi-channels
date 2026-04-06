@@ -110,10 +110,10 @@ export class SharedChannel extends EventEmitter {
     send(msg: Message): void {
         if (!this._joined) throw new Error("Not joined");
 
-        // Attach sender info
+        // Attach sender info (user-provided from takes precedence)
         const enriched: Message = {
             msg: msg.msg,
-            data: { ...msg.data, from: this._name },
+            data: { from: this._name, ...msg.data },
         };
 
         if (this._role === "server" && this.channel) {
