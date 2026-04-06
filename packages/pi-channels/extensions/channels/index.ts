@@ -473,8 +473,9 @@ export default function channelsExtension(pi: any): void {
                         ctx.ui.notify("Not connected to mesh", "error");
                         return;
                     }
+                    const m = mesh;
                     const lines = mesh.channels.map((ch) => {
-                        const members = mesh.channelMembers(ch);
+                        const members = m.channelMembers(ch);
                         return `  #${ch} (${members.length} members: ${members.join(", ")})`;
                     });
                     ctx.ui.notify(["Channels:", ""].concat(lines).join("\n"), "info");

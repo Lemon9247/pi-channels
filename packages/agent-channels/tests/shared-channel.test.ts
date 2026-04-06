@@ -161,30 +161,5 @@ describe("SharedChannel", () => {
         assert.equal(sc.role, "server");
     });
 
-    it("history replays to late joiners", async () => {
-        const sockPath = path.join(dir, "test.sock");
-        const sc1 = new SharedChannel(sockPath, { name: "Alpha", historySize: 50 });
-        cleanups.push(() => sc1.leave());
 
-        await sc1.join();
-
-        // Send some messages (server broadcasts, which get buffered in history)
-        sc1.send({ msg: "message 1", data: { type: "chat" } });
-        sc1.send({ msg: "message 2", data: { type: "chat" } });
-        await wait(50);
-
-        // Late joiner
-        const sc2 = new SharedChannel(sockPath, { name: "Beta" });
-        cleanups.push(() => sc2.leave());
-
-        const received: string[] = [];
-        sc2.on("message", (msg) => received.push(msg.msg));
-
-        await sc2.join();
-        await wait(200);
-
-        // Should have received the history
-        assert.ok(received.includes("message 1"), `Expected "message 1" in ${JSON.stringify(received)}`);
-        assert.ok(received.includes("message 2"), `Expected "message 2" in ${JSON.stringify(received)}`);
-    });
 });

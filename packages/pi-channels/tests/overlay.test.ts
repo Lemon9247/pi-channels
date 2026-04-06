@@ -19,7 +19,7 @@ describe("overlay", () => {
             text: "hello",
             channel: "general",
             isDM: false,
-        });
+        }, "TestAgent");
 
         assert.equal(state.messages.length, 1);
         // Not visible, so should have unread
@@ -34,7 +34,7 @@ describe("overlay", () => {
             text: "hello",
             channel: "general",
             isDM: false,
-        });
+        }, "TestAgent");
 
         state.visible = true;
         state.focusedChannel = "general";
@@ -65,14 +65,14 @@ describe("overlay", () => {
             text: "on general",
             channel: "general",
             isDM: false,
-        });
+        }, "TestAgent");
         overlay.addMessage(state, {
             timestamp: new Date(),
             from: "Beta",
             text: "on testing",
             channel: "testing",
             isDM: false,
-        });
+        }, "TestAgent");
 
         // All
         assert.equal(overlay.getVisibleMessages(state).length, 2);
@@ -115,7 +115,7 @@ describe("overlay", () => {
             text: "hello",
             channel: "general",
             isDM: false,
-        });
+        }, "TestAgent");
 
         const rendered = overlay.renderOverlay(state, {
             width: 60,
@@ -142,7 +142,7 @@ describe("overlay", () => {
                 text: `msg ${i}`,
                 channel: "general",
                 isDM: false,
-            });
+            }, "TestAgent");
         }
 
         assert.equal(state.messages.length, 5);
