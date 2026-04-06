@@ -28,6 +28,12 @@ export interface OverlayState {
     scrollOffset: number;
     /** Unread count per channel. */
     unread: Map<string, number>;
+    /** Unread count per DM sender. */
+    dmUnread: Map<string, number>;
+    /** Input history for up-arrow recall. */
+    inputHistory: string[];
+    /** History index for navigation (-1 = current input). */
+    historyIndex: number;
     /** Maximum messages to keep. */
     maxMessages: number;
 }
@@ -43,6 +49,9 @@ export function createOverlayState(): OverlayState {
         inputBuffer: "",
         scrollOffset: 0,
         unread: new Map(),
+        dmUnread: new Map(),
+        inputHistory: [],
+        historyIndex: -1,
         maxMessages: 500,
     };
 }
@@ -50,17 +59,60 @@ export function createOverlayState(): OverlayState {
 /**
  * Add a message to the overlay state.
  */
-export function addMessage(state: OverlayState, msg: ChatMessage): void {
+export function addMessage(state: OverlayState, msg: ChatMessage, agentName: string): void {
     state.messages.push(msg);
     if (state.messages.length > state.maxMessages) {
         state.messages.shift();
     }
 
-    // Track unread if overlay not visible or focused on different channel
+    // Don't track unread for own messages
+    if (msg.from === agentName) return;
+
+    // Track DM unread per sender
+    if (msg.isDM) {
+        if (!state.visible || (state.focusedChannel !== "all" && state.focusedChannel !== "dm")) {
+            const current = state.dmUnread.get(msg.from) ?? 0;
+            state.dmUnread.set(msg.from, current + 1);
+        }
+        return;
+    }
+
+    // Track channel unread
     if (!state.visible || (state.focusedChannel !== "all" && state.focusedChannel !== msg.channel)) {
         const current = state.unread.get(msg.channel) ?? 0;
         state.unread.set(msg.channel, current + 1);
     }
+}
+
+/**
+ * Add input to history.
+ */
+export function addToHistory(state: OverlayState, input: string): void {
+    if (!input.trim()) return;
+    state.inputHistory.push(input.trim());
+    if (state.inputHistory.length > 50) {
+        state.inputHistory.shift();
+    }
+    state.historyIndex = -1;
+}
+
+/**
+ * Navigate history (up = -1, down = +1).
+ * Returns the input at new history position, or null if at end.
+ */
+export function navigateHistory(state: OverlayState, direction: -1 | 1): string | null {
+    if (state.inputHistory.length === 0) return null;
+
+    const newIndex = state.historyIndex + direction;
+    if (newIndex < 0) {
+        state.historyIndex = -1;
+        return "";
+    }
+    if (newIndex >= state.inputHistory.length) {
+        return null;
+    }
+    state.historyIndex = newIndex;
+    return state.inputHistory[state.inputHistory.length - 1 - state.historyIndex] ?? "";
 }
 
 /**

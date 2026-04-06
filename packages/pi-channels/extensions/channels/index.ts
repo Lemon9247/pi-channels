@@ -101,7 +101,7 @@ function onMeshMessage(msg: Message, meta: MessageMeta): void {
         channel: meta.channel,
         isDM: meta.channel === "dm",
     };
-    overlay.addMessage(overlayState, chatMsg);
+    overlay.addMessage(overlayState, chatMsg, agentName);
 
     // Update status bar to show unread
     updateStatusBar();
@@ -142,7 +142,7 @@ function onMeshJoin(name: string, channel: string): void {
         text: `${name} joined #${channel}`,
         channel,
         isDM: false,
-    });
+    }, agentName);
 
     updateStatusBar();
 }
@@ -165,7 +165,7 @@ function onMeshLeave(name: string, channel: string): void {
         text: `${name} left #${channel}`,
         channel,
         isDM: false,
-    });
+    }, agentName);
 
     updateStatusBar();
 }
@@ -204,10 +204,12 @@ async function connectToMesh(model?: string): Promise<string> {
     // Join mesh
     await mesh.join();
 
-    // Auto-join channels from env var
-    const autoJoinChannels = process.env.PI_CHANNELS_JOIN;
-    if (autoJoinChannels) {
-        for (const ch of autoJoinChannels.split(",").filter(Boolean)) {
+    // Auto-join channels from config and env var
+    const configChannels = config?.autoJoinChannels ?? ["general"];
+    const envChannels = process.env.PI_CHANNELS_JOIN?.split(",").filter(Boolean) ?? [];
+    const channelsToJoin = [...new Set([...configChannels, ...envChannels])];
+    for (const ch of channelsToJoin) {
+        if (ch.trim() && ch !== "general") {  // general already joined
             await mesh.join(ch.trim());
         }
     }

@@ -16,14 +16,14 @@ describe("shouldAutoRegister", () => {
         assert.equal(shouldAutoRegister(config, "/any/path"), false);
     });
 
-    it("returns true when PI_CHANNELS_AUTO_JOIN=1", () => {
-        const orig = process.env.PI_CHANNELS_AUTO_JOIN;
-        process.env.PI_CHANNELS_AUTO_JOIN = "1";
+    it("returns true when PI_CHANNELS_AUTO_REGISTER=1", () => {
+        const orig = process.env.PI_CHANNELS_AUTO_REGISTER;
+        process.env.PI_CHANNELS_AUTO_REGISTER = "1";
         try {
             assert.equal(shouldAutoRegister(DEFAULT_CONFIG, "/any/path"), true);
         } finally {
-            if (orig === undefined) delete process.env.PI_CHANNELS_AUTO_JOIN;
-            else process.env.PI_CHANNELS_AUTO_JOIN = orig;
+            if (orig === undefined) delete process.env.PI_CHANNELS_AUTO_REGISTER;
+            else process.env.PI_CHANNELS_AUTO_REGISTER = orig;
         }
     });
 

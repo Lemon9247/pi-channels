@@ -41,6 +41,7 @@ export const DEFAULT_CONFIG: ChannelsConfig = {
     feedRetention: 50,
     showWidget: true,
     terminal: "auto",
+    autoJoinChannels: ["general"],
 };
 
 // ─── Registry ───────────────────────────────────────────────────────

@@ -40,7 +40,7 @@ export function saveConfigValue(
  */
 export function shouldAutoRegister(config: ChannelsConfig, cwd: string): boolean {
     if (config.autoRegister) return true;
-    if (process.env.PI_CHANNELS_AUTO_JOIN === "1") return true;
+    if (process.env.PI_CHANNELS_AUTO_REGISTER === "1") return true;
 
     const expandedPaths = config.autoRegisterPaths.map((p) =>
         p.replace(/^~/, os.homedir()),

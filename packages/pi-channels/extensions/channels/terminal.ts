@@ -1,7 +1,7 @@
 import { execSync, spawn } from "node:child_process";
 import * as path from "node:path";
 
-export type TerminalType = "tmux" | "kitty" | "iterm2" | "macos-terminal" | "gnome-terminal" | "xterm" | "konsole" | "unknown";
+export type TerminalType = "tmux" | "kitty" | "iterm2" | "macos-terminal" | "gnome-terminal" | "xterm" | "konsole" | "alacritty" | "wezterm" | "windows-terminal" | "unknown";
 
 /**
  * Detect the current terminal emulator.
@@ -11,17 +11,30 @@ export function detectTerminal(preference: string): TerminalType {
         return preference as TerminalType;
     }
 
-    // Check environment
+    // Check environment - ordered by specificity
     if (process.env.TMUX) return "tmux";
+    if (process.env.WT_SESSION) return "windows-terminal";
+    if (process.env.ALACRITTY_SOCKET) return "alacritty";
+    if (process.env.WEZTERM_PANE) return "wezterm";
     if (process.env.TERM_PROGRAM === "iTerm.app") return "iterm2";
     if (process.env.KITTY_PID || process.env.TERM?.includes("kitty")) return "kitty";
     if (process.env.TERM_PROGRAM === "Apple_Terminal") return "macos-terminal";
 
-    // Linux: check available terminals
+    // Linux: check available terminals (ordered by preference)
+    if (process.platform === "linux" || process.platform === "darwin") {
+        if (commandExists("alacritty")) return "alacritty";
+        if (commandExists("wezterm")) return "wezterm";
+    }
+    
     if (process.platform === "linux") {
         if (commandExists("gnome-terminal")) return "gnome-terminal";
         if (commandExists("konsole")) return "konsole";
         if (commandExists("xterm")) return "xterm";
+    }
+
+    // Windows: check for Windows Terminal
+    if (process.platform === "win32") {
+        if (commandExists("wt")) return "windows-terminal";
     }
 
     // macOS fallback
@@ -59,7 +72,7 @@ export function spawnTerminal(options: {
     cwd?: string;
     terminal: string;
     env: Record<string, string>;
-}): { success: boolean; command: string; terminal: TerminalType } {
+}): { success: boolean; command: string; terminal: TerminalType; error?: string } {
     const terminal = detectTerminal(options.terminal);
     const piCmd = buildPiCommand(options.prompt, options.env, options.cwd);
 
@@ -120,9 +133,59 @@ export function spawnTerminal(options: {
                 return { success: true, command: cmd, terminal };
             }
 
+            case "alacritty": {
+                const child = spawn("alacritty", ["-e", "sh", "-c", piCmd], {
+                    stdio: "ignore",
+                    detached: true,
+                });
+                child.unref();
+                const cmd = `alacritty -e sh -c '${piCmd.replace(/'/g, "'\\''")}'`;
+                return { success: true, command: cmd, terminal };
+            }
+
+            case "wezterm": {
+                const args = ["start", "--", "sh", "-c", piCmd];
+                // On Windows, use wezterm-gui or wezterm cli
+                const exe = process.platform === "win32" ? "wezterm" : "wezterm";
+                const child = spawn(exe, args, {
+                    stdio: "ignore",
+                    detached: true,
+                });
+                child.unref();
+                return { success: true, command: `${exe} ${args.join(" ")}`, terminal };
+            }
+
+            case "windows-terminal": {
+                // Windows Terminal (wt.exe) - spawn new tab/window
+                const child = spawn("wt", ["-d", ".", "cmd", "/k", piCmd], {
+                    stdio: "ignore",
+                    detached: true,
+                });
+                child.unref();
+                return { success: true, command: `wt -d . cmd /k "${piCmd}"`, terminal };
+            }
+
             default:
-                // Fallback: return the command for manual execution
-                return { success: false, command: piCmd, terminal: "unknown" };
+                // Fallback: return the command for manual execution with helpful error context
+                const troubleshooting = [
+                    "Could not auto-detect terminal.",
+                    "",
+                    "Supported terminals:",
+                    "  • tmux (TMUX env)",
+                    "  • kitty (KITTY_PID env)",
+                    "  • iTerm2 (iTerm.app)",
+                    "  • macOS Terminal",                    "  • Windows Terminal (WT_SESSION env)",
+                    "  • Alacritty (ALACRITTY_SOCKET env)",
+                    "  • WezTerm (WEZTERM_PANE env)",
+                    "  • GNOME Terminal",
+                    "  • Konsole",
+                    "  • xterm",
+                    "",
+                    "Or run manually:",
+                    `  ${piCmd}`,
+                ].join("\n");
+                return { success: false, command: piCmd, terminal: "unknown", error: troubleshooting };
+
         }
     } catch {
         // Terminal command failed — return for manual execution

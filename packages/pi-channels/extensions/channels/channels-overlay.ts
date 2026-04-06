@@ -57,6 +57,8 @@ export class ChannelsOverlay {
     ) {
         // Clear unread on open
         overlay.clearFocusedUnread(this.ctx.overlayState);
+        // Clear DM unread
+        this.ctx.overlayState.dmUnread.clear();
     }
 
     handleInput(data: string): void {
@@ -124,15 +126,33 @@ export class ChannelsOverlay {
             return;
         }
 
-        // Navigation
+        // ? — show help
+        if (data === "?") {
+            this.setNotification("↑↓ scroll | m msg | @nick DM | j join | c connect | Tab cycle | Esc close");
+            return;
+        }
+
+        // Navigation and scroll
         if (data === "\x1b[A") { // up
-            this.selectedIndex = Math.max(0, this.selectedIndex - 1);
-            this.tui.requestRender();
+            if (this.tab === "chat") {
+                // Scroll up in chat
+                this.ctx.overlayState.scrollOffset++;
+                this.tui.requestRender();
+            } else {
+                this.selectedIndex = Math.max(0, this.selectedIndex - 1);
+                this.tui.requestRender();
+            }
             return;
         }
         if (data === "\x1b[B") { // down
-            this.selectedIndex++;
-            this.tui.requestRender();
+            if (this.tab === "chat") {
+                // Scroll down in chat
+                this.ctx.overlayState.scrollOffset = Math.max(0, this.ctx.overlayState.scrollOffset - 1);
+                this.tui.requestRender();
+            } else {
+                this.selectedIndex++;
+                this.tui.requestRender();
+            }
             return;
         }
     }
@@ -153,6 +173,26 @@ export class ChannelsOverlay {
                 this.submitMessage();
             } else if (this.inputMode === "channel") {
                 this.submitJoinChannel();
+            }
+            return;
+        }
+
+        // Up arrow — previous in history
+        if (data === "\x1b[A") {
+            const prev = overlay.navigateHistory(this.ctx.overlayState, -1);
+            if (prev !== null) {
+                this.inputBuffer = prev;
+                this.tui.requestRender();
+            }
+            return;
+        }
+
+        // Down arrow — next in history
+        if (data === "\x1b[B") {
+            const next = overlay.navigateHistory(this.ctx.overlayState, 1);
+            if (next !== null) {
+                this.inputBuffer = next;
+                this.tui.requestRender();
             }
             return;
         }
@@ -181,6 +221,9 @@ export class ChannelsOverlay {
         }
 
         let text = this.inputBuffer.trim();
+
+        // Save to history before sending
+        overlay.addToHistory(this.ctx.overlayState, text);
 
         // Check for @agent DM syntax
         if (text.startsWith("@")) {
