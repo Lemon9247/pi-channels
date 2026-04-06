@@ -232,17 +232,17 @@ export class ChannelsOverlay {
                 const target = text.substring(1, spaceIdx);
                 const msg = text.substring(spaceIdx + 1).trim();
                 if (msg) {
-                    mesh.sendToAs("Willow", target, msg).catch(() => {
+                    mesh.sendToAs("User", target, msg).catch(() => {
                         this.setNotification(`Failed to DM ${target}`);
                     });
-                    feed.appendEvent(this.ctx.projectDir, "message", "Willow", `DM to ${target}: ${msg}`);
+                    feed.appendEvent(this.ctx.projectDir, "message", "User", `DM to ${target}: ${msg}`);
                     this.setNotification(`Sent DM to ${target}`);
                 }
             }
         } else {
             // Channel message - send as human (Willow), not as agent
-            mesh.sendAs("Willow", text, { channel: this.messageChannel });
-            feed.appendEvent(this.ctx.projectDir, "message", "Willow", `#${this.messageChannel}: ${text}`);
+            mesh.sendAs("User", text, { channel: this.messageChannel });
+            feed.appendEvent(this.ctx.projectDir, "message", "User", `#${this.messageChannel}: ${text}`);
             this.setNotification(`Sent to #${this.messageChannel}`);
         }
 
