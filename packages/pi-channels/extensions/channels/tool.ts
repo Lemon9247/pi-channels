@@ -8,6 +8,9 @@ import * as terminal from "./terminal.js";
 import { generateUniqueName } from "./names.js";
 import { loadConfig, saveConfigValue } from "./config.js";
 
+/** Valid channel name: starts with letter, letters/digits/underscore/hyphen, 1-32 chars. */
+const CHANNEL_NAME_REGEX = /^[a-zA-Z][a-zA-Z0-9_-]{0,31}$/;
+
 /**
  * The pi_channels tool definition (for pi's tool registration).
  */
@@ -91,6 +94,11 @@ export async function executeTool(
     },
 ): Promise<string> {
     const { mesh, config, agentName, projectDir } = context;
+
+    // Validate channel name format
+    if (params.channel && !CHANNEL_NAME_REGEX.test(params.channel)) {
+        return `❌ Invalid channel name "${params.channel}". Use letters, digits, underscores, hyphens. Start with a letter. Max 32 chars.`;
+    }
 
     switch (params.action) {
         // ─── Coordination ────────────────────────────────────────

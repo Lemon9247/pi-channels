@@ -187,9 +187,13 @@ export function spawnTerminal(options: {
                 return { success: false, command: piCmd, terminal: "unknown", error: troubleshooting };
 
         }
-    } catch {
-        // Terminal command failed — return for manual execution
-        return { success: false, command: piCmd, terminal };
+    } catch (err) {
+        return {
+            success: false,
+            command: piCmd,
+            terminal,
+            error: `Spawn failed: ${(err as Error).message}`
+        };
     }
 }
 

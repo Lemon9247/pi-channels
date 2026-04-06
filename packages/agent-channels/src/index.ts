@@ -9,11 +9,4 @@ export {
 } from "./group.js";
 export { SharedChannel, type SharedChannelOptions } from "./shared-channel.js";
 export { Mesh, type MeshOptions, type MessageMeta } from "./mesh.js";
-export { type Bridge } from "./bridge.js";
-export {
-    TcpBridgeServer,
-    TcpBridgeClient,
-    type TcpBridgeServerOptions,
-    type TcpBridgeClientOptions,
-} from "./bridges/tcp.js";
 export { allOrCleanup } from "./util.js";

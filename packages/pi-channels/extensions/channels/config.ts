@@ -11,7 +11,9 @@ const PROJECT_CONFIG_NAME = path.join(".pi", "channels.json");
  */
 export function loadConfig(projectDir?: string): ChannelsConfig {
     const global = readJsonSafe(GLOBAL_CONFIG_PATH);
+    validateConfig(global);
     const project = projectDir ? readJsonSafe(path.join(projectDir, PROJECT_CONFIG_NAME)) : {};
+    validateConfig(project);
     return { ...DEFAULT_CONFIG, ...global, ...project };
 }
 
@@ -70,4 +72,16 @@ function readJsonSafe(filepath: string): Record<string, unknown> {
         // File doesn't exist or invalid JSON
     }
     return {};
+}
+
+/**
+ * Validate config keys and warn on unknown ones.
+ */
+function validateConfig(partial: Record<string, unknown>): void {
+    const validKeys = Object.keys(DEFAULT_CONFIG);
+    for (const key of Object.keys(partial)) {
+        if (!validKeys.includes(key)) {
+            console.warn(`[pi-channels] Unknown config key "${key}" — ignoring.`);
+        }
+    }
 }

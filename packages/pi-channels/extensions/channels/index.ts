@@ -302,6 +302,25 @@ async function shutdownSession(): Promise<void> {
     reservations.clearAllReservations();
 }
 
+// --- Emergency Crash Cleanup ---
+
+process.on("exit", () => {
+    // Sync-only emergency cleanup — don't await anything
+    if (agentName) {
+        try {
+            registry.unregisterAgent(agentName);
+        } catch {
+            // Best effort
+        }
+    }
+});
+
+process.on("uncaughtException", (err) => {
+    console.error("[pi-channels] Uncaught exception:", err);
+    // Log then let process exit naturally — shutdownSession() won't run,
+    // but cleanupStaleEntries() on the next session start will handle registry.
+});
+
 // --- Extension Factory (pi API) ---
 
 export default function channelsExtension(pi: any): void {

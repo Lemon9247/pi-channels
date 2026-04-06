@@ -18,7 +18,11 @@ export function ensureRegistryDir(): void {
 export function registerAgent(entry: RegistryEntry): void {
     ensureRegistryDir();
     const filepath = path.join(REGISTRY_DIR, `${entry.name}.json`);
-    fs.writeFileSync(filepath, JSON.stringify(entry, null, 2) + "\n");
+    try {
+        fs.writeFileSync(filepath, JSON.stringify(entry, null, 2) + "\n");
+    } catch (err) {
+        console.error("[pi-channels] Failed to write registry entry:", err);
+    }
 }
 
 /**

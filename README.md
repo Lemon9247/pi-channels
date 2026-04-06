@@ -72,6 +72,15 @@ pi-channels/
 - `/channels status` — quick status
 - `/channels config` — show config
 
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `PI_AGENT_NAME` | Override auto-generated agent name |
+| `PI_CHANNELS_JOIN` | Comma-separated channels to auto-join on connect |
+| `PI_CHANNELS_AUTO_REGISTER` | Set `"1"` to force auto-register regardless of config |
+| `PI_CHANNELS_SPAWNED_BY` | Set by parent when spawning — for spawn tracking |
+
 ## Config
 
 Global: `~/.pi/agent/channels.json`  
