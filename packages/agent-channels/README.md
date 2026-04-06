@@ -231,32 +231,6 @@ mesh.on("join", (name, channel) => { /* agent joined */ });
 mesh.on("leave", (name, channel) => { /* agent left */ });
 ```
 
-### `ChannelGroup`
-
-Manages a directory of channels with lifecycle:
-
-```typescript
-import { ChannelGroup } from "agent-channels";
-
-const group = new ChannelGroup({
-    path: "/tmp/channels/my-group",
-    channels: [
-        { name: "general" },
-        { name: "topic-research" },
-    ],
-});
-
-await group.start();  // creates dir, starts all channels
-
-group.list();              // ["general", "topic-research"]
-group.channel("general"); // returns the Channel instance
-
-await group.addChannel({ name: "topic-new" });
-await group.removeChannel("topic-new");
-
-await group.stop({ removeDir: true }); // stop + cleanup
-```
-
 ### `encode` / `FrameDecoder`
 
 Low-level framing utilities:

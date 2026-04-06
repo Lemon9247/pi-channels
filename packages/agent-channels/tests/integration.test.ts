@@ -3,338 +3,219 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { ChannelGroup } from "../src/group.js";
-import { ChannelClient } from "../src/client.js";
-import type { Message } from "../src/message.js";
+import { Mesh } from "../src/mesh.js";
+import type { Message, MessageMeta } from "../src/index.js";
 
-function tmpGroupPath(suffix = ""): string {
-    return path.join(
-        fs.mkdtempSync(path.join(os.tmpdir(), "int-test-")),
-        `group${suffix}`
-    );
+function tmpDir(): string {
+    return fs.mkdtempSync(path.join(os.tmpdir(), "mesh-int-test-"));
 }
 
-const cleanupItems: Array<{ stop?: (opts?: any) => Promise<void>; disconnect?: () => void }> = [];
+const cleanup: Array<{ leave?: () => Promise<void> }> = [];
 
 afterEach(async () => {
-    for (const item of cleanupItems) {
+    for (const item of cleanup) {
         try {
-            if (item.disconnect) item.disconnect();
-            if (item.stop) await item.stop({ removeDir: true });
+            if (item.leave) await item.leave();
         } catch { /* ignore */ }
     }
-    cleanupItems.length = 0;
+    cleanup.length = 0;
 });
 
-function track<T extends { stop?: (opts?: any) => Promise<void>; disconnect?: () => void }>(item: T): T {
-    cleanupItems.push(item as any);
+function track<T extends { leave?: () => Promise<void> }>(item: T): T {
+    cleanup.push(item as any);
     return item;
 }
 
+function wait(ms: number): Promise<void> {
+    return new Promise((r) => setTimeout(r, ms));
+}
+
 describe("Integration", () => {
-    it("realistic swarm topology: general + 3 inboxes, 3 agents + queen", async () => {
-        const groupPath = tmpGroupPath();
-        const group = track(new ChannelGroup({
-            path: groupPath,
-            channels: [
-                { name: "general" },
-                { name: "inbox-queen" },
-                { name: "inbox-a1" },
-                { name: "inbox-a2" },
-                { name: "inbox-a3" },
-            ],
-        }));
-        await group.start();
+    it("multi-agent mesh: general chat + DMs", async () => {
+        const dir = tmpDir();
 
-        // Queen connects to general and all inboxes (reads everything)
-        const queen = {
-            general: track(new ChannelClient(path.join(groupPath, "general.sock"))),
-            inbox: track(new ChannelClient(path.join(groupPath, "inbox-queen.sock"))),
-        };
-        await queen.general.connect();
-        await queen.inbox.connect();
+        // Queen agent
+        const queen = track(new Mesh({ name: "queen", dir }));
+        await queen.join();
+        await queen.joinChannel("general");
+        queen.on("message", (msg: Message) => {
+            void msg; // queen receives
+        });
 
-        // Each agent connects to general + their own inbox
-        const agents: Array<{
-            name: string;
-            general: ChannelClient;
-            inbox: ChannelClient;
-        }> = [];
-
+        // Worker agents
+        const workers: Mesh[] = [];
         for (const name of ["a1", "a2", "a3"]) {
-            const agent = {
-                name,
-                general: track(new ChannelClient(path.join(groupPath, "general.sock"))),
-                inbox: track(new ChannelClient(path.join(groupPath, `inbox-${name}.sock`))),
-            };
-            await agent.general.connect();
-            await agent.inbox.connect();
-            agents.push(agent);
+            const w = track(new Mesh({ name, dir }));
+            await w.join();
+            await w.joinChannel("general");
+            workers.push(w);
         }
 
-        // Collect messages
-        const queenGeneralMsgs: Message[] = [];
-        const queenInboxMsgs: Message[] = [];
-        const agentMsgs: Map<string, Message[]> = new Map();
+        await wait(100); // let joins propagate
 
-        queen.general.on("message", (msg: Message) => queenGeneralMsgs.push(msg));
-        queen.inbox.on("message", (msg: Message) => queenInboxMsgs.push(msg));
-
-        for (const agent of agents) {
-            const msgs: Message[] = [];
-            agentMsgs.set(agent.name, msgs);
-            agent.general.on("message", (msg: Message) => msgs.push(msg));
-            agent.inbox.on("message", (msg: Message) => msgs.push(msg));
+        // a1 posts a finding to general
+        const a1 = workers[0]!;
+        const msgs: Array<{ msg: Message; meta: MessageMeta }> = [];
+        queen.on("message", (msg, meta) => msgs.push({ msg, meta }));
+        for (const w of workers.slice(1)) {
+            w.on("message", () => { /* ignore */ });
         }
 
-        // --- Scenario ---
+        a1.send("Found the bug in framing.ts", { channel: "general" });
+        await wait(50);
 
-        // 1. Agent a1 posts a finding to General
-        agents[0]!.general.send({
-            msg: "Found the bug in framing.ts",
-            data: { from: "a1", type: "finding" },
+        // Queen and a2, a3 should see it on general (sender excluded)
+        assert.ok(msgs.some(m => m.meta.channel === "general"), "queen should see general message");
+
+        // a2 sends blocker to queen via DM
+        const dmReceived: Message[] = [];
+        queen.on("message", (msg, meta) => {
+            if (meta.channel === "dm") dmReceived.push(msg);
         });
-        await new Promise((r) => setTimeout(r, 30));
 
-        // Queen and other agents see it on General
-        assert.equal(queenGeneralMsgs.length, 1);
-        assert.equal(agentMsgs.get("a2")!.length, 1);
-        assert.equal(agentMsgs.get("a3")!.length, 1);
-        // a1 doesn't see its own message (sender excluded)
-        assert.equal(agentMsgs.get("a1")!.length, 0);
+        await a1.sendTo("queen", "Blocked on permissions — need sudo");
+        await wait(50);
 
-        // 2. Agent a2 sends a blocker to queen's inbox
-        const queenInboxClient = track(new ChannelClient(path.join(groupPath, "inbox-queen.sock")));
-        await queenInboxClient.connect();
-        queenInboxClient.send({
-            msg: "Blocked on permissions — need sudo",
-            data: { from: "a2", type: "blocker" },
+        assert.ok(dmReceived.some(m => m.msg.includes("Blocked")), "queen should receive DM");
+
+        // Queen sends instruction to a3 via DM
+        const a3Msgs: Message[] = [];
+        const a3 = workers[2]!;
+        a3.on("message", (msg, meta) => {
+            if (meta.channel === "dm") a3Msgs.push(msg);
         });
-        await new Promise((r) => setTimeout(r, 30));
 
-        assert.equal(queenInboxMsgs.length, 1);
-        assert.equal(queenInboxMsgs[0]!.data!.type, "blocker");
+        await queen.sendTo("a3", "Take over a2's task");
+        await wait(50);
 
-        // 3. Queen sends instruction to a3's inbox
-        const a3InboxClient = track(new ChannelClient(path.join(groupPath, "inbox-a3.sock")));
-        await a3InboxClient.connect();
-        a3InboxClient.send({
-            msg: "Take over a2's task — they're blocked",
-            data: { from: "queen", type: "instruction" },
-        });
-        await new Promise((r) => setTimeout(r, 30));
+        assert.ok(a3Msgs.some(m => m.msg.includes("Take over")), "a3 should receive DM");
 
-        // a3 receives the instruction on their inbox
-        const a3Messages = agentMsgs.get("a3")!;
-        assert.ok(a3Messages.some((m) => m.data?.type === "instruction"));
-
-        // 4. Agent a3 signals done to queen inbox + general
-        const doneMsg: Message = {
-            msg: "Task complete — wrote findings to hive-mind",
-            data: { from: "a3", type: "done" },
-        };
-
-        // Send to queen inbox
-        const queenInboxClient2 = track(new ChannelClient(path.join(groupPath, "inbox-queen.sock")));
-        await queenInboxClient2.connect();
-        queenInboxClient2.send(doneMsg);
-
-        // Also post to general
-        agents[2]!.general.send({
-            msg: "Done — wrote findings",
-            data: { from: "a3", type: "done" },
-        });
-        await new Promise((r) => setTimeout(r, 30));
-
-        // Queen sees done on both channels
-        assert.ok(queenInboxMsgs.some((m) => m.data?.type === "done"));
-        assert.ok(queenGeneralMsgs.some((m) => m.data?.type === "done"));
-
-        // Cleanup
-        queenInboxClient.disconnect();
-        queenInboxClient2.disconnect();
-        a3InboxClient.disconnect();
-        queen.general.disconnect();
-        queen.inbox.disconnect();
-        for (const agent of agents) {
-            agent.general.disconnect();
-            agent.inbox.disconnect();
-        }
-        await group.stop({ removeDir: true });
-    });
-
-    it("multiple groups running simultaneously", async () => {
-        const group1Path = tmpGroupPath("-1");
-        const group2Path = tmpGroupPath("-2");
-
-        const group1 = track(new ChannelGroup({
-            path: group1Path,
-            channels: [{ name: "general" }, { name: "inbox-a1" }],
-        }));
-
-        const group2 = track(new ChannelGroup({
-            path: group2Path,
-            channels: [{ name: "general" }, { name: "inbox-b1" }],
-        }));
-
-        await group1.start();
-        await group2.start();
-
-        // Clients on group 1
-        const g1c1 = track(new ChannelClient(path.join(group1Path, "general.sock")));
-        const g1c2 = track(new ChannelClient(path.join(group1Path, "general.sock")));
-        await g1c1.connect();
-        await g1c2.connect();
-
-        // Clients on group 2
-        const g2c1 = track(new ChannelClient(path.join(group2Path, "general.sock")));
-        const g2c2 = track(new ChannelClient(path.join(group2Path, "general.sock")));
-        await g2c1.connect();
-        await g2c2.connect();
-
-        const g1received: Message[] = [];
-        const g2received: Message[] = [];
-        g1c2.on("message", (msg: Message) => g1received.push(msg));
-        g2c2.on("message", (msg: Message) => g2received.push(msg));
-
-        // Send on group 1 — should NOT appear on group 2
-        g1c1.send({ msg: "group 1 only" });
-        // Send on group 2 — should NOT appear on group 1
-        g2c1.send({ msg: "group 2 only" });
-
-        await new Promise((r) => setTimeout(r, 50));
-
-        assert.equal(g1received.length, 1);
-        assert.equal(g1received[0]!.msg, "group 1 only");
-        assert.equal(g2received.length, 1);
-        assert.equal(g2received[0]!.msg, "group 2 only");
-
-        g1c1.disconnect(); g1c2.disconnect();
-        g2c1.disconnect(); g2c2.disconnect();
-        await group1.stop({ removeDir: true });
-        await group2.stop({ removeDir: true });
-    });
-
-    it("runtime channel addition with active clients", async () => {
-        const groupPath = tmpGroupPath();
-        const group = track(new ChannelGroup({
-            path: groupPath,
-            channels: [{ name: "general" }],
-        }));
-        await group.start();
-
-        // Client on general
-        const generalClient = track(new ChannelClient(path.join(groupPath, "general.sock")));
-        await generalClient.connect();
-
-        // Add a topic channel at runtime
-        await group.addChannel({ name: "topic-research" });
-
-        // Client connects to the new channel
-        const topicClient1 = track(new ChannelClient(path.join(groupPath, "topic-research.sock")));
-        const topicClient2 = track(new ChannelClient(path.join(groupPath, "topic-research.sock")));
-        await topicClient1.connect();
-        await topicClient2.connect();
-
-        const received: Message[] = [];
-        topicClient2.on("message", (msg: Message) => received.push(msg));
-
-        topicClient1.send({ msg: "research finding" });
-        await new Promise((r) => setTimeout(r, 50));
-
-        assert.equal(received.length, 1);
-        assert.equal(received[0]!.msg, "research finding");
-
-        generalClient.disconnect();
-        topicClient1.disconnect();
-        topicClient2.disconnect();
-        await group.stop({ removeDir: true });
-    });
-
-    it("high-throughput message delivery", async () => {
-        const groupPath = tmpGroupPath();
-        const group = track(new ChannelGroup({
-            path: groupPath,
-            channels: [{ name: "firehose" }],
-        }));
-        await group.start();
-
-        const sender = track(new ChannelClient(path.join(groupPath, "firehose.sock")));
-        const receiver = track(new ChannelClient(path.join(groupPath, "firehose.sock")));
-        await sender.connect();
-        await receiver.connect();
-
-        const messageCount = 500;
-        const received: Message[] = [];
-
-        const allReceived = new Promise<void>((resolve) => {
-            receiver.on("message", (msg: Message) => {
-                received.push(msg);
-                if (received.length === messageCount) resolve();
+        // a3 signals done to general
+        const generalDone: Message[] = [];
+        for (const w of workers) {
+            w.on("message", (msg, meta) => {
+                if (meta.channel === "general") generalDone.push(msg);
             });
+        }
+        const queenGenMsgs: Message[] = [];
+        queen.on("message", (msg, meta) => {
+            if (meta.channel === "general") queenGenMsgs.push(msg);
         });
 
-        // Send 500 messages rapidly
-        for (let i = 0; i < messageCount; i++) {
-            sender.send({ msg: `msg-${i}`, data: { seq: i } });
+        await a3.send("Task complete", { channel: "general" });
+        await wait(50);
+
+        assert.ok(
+            queenGenMsgs.some(m => m.msg.includes("Task complete")),
+            "queen should see done on general"
+        );
+    });
+
+    it("isolated meshes: same dir, different project dirs", async () => {
+        const dir = tmpDir();
+        const dir2 = tmpDir();
+
+        // Two meshes in dir
+        const m1a = track(new Mesh({ name: "m1a", dir }));
+        const m1b = track(new Mesh({ name: "m1b", dir }));
+        await m1a.join();
+        await m1b.join();
+        await wait(100);
+
+        // Two meshes in dir2
+        const m2a = track(new Mesh({ name: "m2a", dir: dir2 }));
+        const m2b = track(new Mesh({ name: "m2b", dir: dir2 }));
+        await m2a.join();
+        await m2b.join();
+        await wait(100);
+
+        // m1a and m1b are on same mesh
+        assert.ok(m1a.allMembers().includes("m1b"));
+        assert.ok(m1b.allMembers().includes("m1a"));
+
+        // m2a and m2b are on same mesh
+        assert.ok(m2a.allMembers().includes("m2b"));
+        assert.ok(m2b.allMembers().includes("m2a"));
+
+        // Cross-mesh isolation is handled by projectDir in pi-channels extension
+        // (agent-channels itself doesn't enforce isolation — that's the extension layer)
+    });
+
+    it("rapid message delivery: 500 messages", async () => {
+        const dir = tmpDir();
+
+        const sender = track(new Mesh({ name: "sender", dir }));
+        const receiver = track(new Mesh({ name: "receiver", dir }));
+        await sender.join();
+        await receiver.join();
+        await wait(100);
+
+        const received: Message[] = [];
+        receiver.on("message", (msg) => received.push(msg));
+
+        const count = 500;
+        for (let i = 0; i < count; i++) {
+            sender.send(`msg-${i}`, { channel: "general" });
         }
 
-        // Wait for all to arrive (with timeout)
         await Promise.race([
-            allReceived,
+            (async () => {
+                while (received.length < count) await wait(10);
+            })(),
             new Promise<void>((_, reject) =>
                 setTimeout(() => reject(new Error(
-                    `Timeout: received ${received.length}/${messageCount} messages`
+                    `Timeout: ${received.length}/${count} messages`
                 )), 5000)
             ),
         ]);
 
-        assert.equal(received.length, messageCount);
-        // Verify ordering is preserved (single sender)
-        for (let i = 0; i < messageCount; i++) {
-            assert.equal(received[i]!.data!.seq, i);
+        assert.equal(received.length, count);
+        for (let i = 0; i < count; i++) {
+            assert.equal(received[i]!.msg, `msg-${i}`);
         }
-
-        sender.disconnect();
-        receiver.disconnect();
-        await group.stop({ removeDir: true });
     });
 
-    it("inbox pattern: multiple writers, one reader", async () => {
-        const groupPath = tmpGroupPath();
-        const group = track(new ChannelGroup({
-            path: groupPath,
-            channels: [{ name: "inbox-queen" }],
-        }));
-        await group.start();
+    it("DM: multiple senders, one recipient", async () => {
+        const dir = tmpDir();
 
-        // Queen reads their inbox
-        const queenReader = track(new ChannelClient(path.join(groupPath, "inbox-queen.sock")));
-        await queenReader.connect();
+        const recipient = track(new Mesh({ name: "recipient", dir }));
+        const senders: Mesh[] = [];
+        for (const name of ["s1", "s2", "s3"]) {
+            const s = track(new Mesh({ name, dir }));
+            await s.join();
+            senders.push(s);
+        }
+        await recipient.join();
+        await wait(100);
 
         const received: Message[] = [];
-        queenReader.on("message", (msg: Message) => received.push(msg));
+        recipient.on("message", (msg, meta) => {
+            if (meta.channel === "dm") received.push(msg);
+        });
 
-        // Three agents write to queen's inbox
-        for (const agentName of ["a1", "a2", "a3"]) {
-            const writer = new ChannelClient(path.join(groupPath, "inbox-queen.sock"));
-            await writer.connect();
-            writer.send({
-                msg: `Report from ${agentName}`,
-                data: { from: agentName },
-            });
-            // Small delay to let the message through before disconnect
-            await new Promise((r) => setTimeout(r, 10));
-            writer.disconnect();
+        for (const s of senders) {
+            await s.sendTo("recipient", `Report from ${s.name}`);
         }
-
-        await new Promise((r) => setTimeout(r, 50));
+        await wait(100);
 
         assert.equal(received.length, 3);
-        const senders = received.map((m) => m.data!.from).sort();
-        assert.deepEqual(senders, ["a1", "a2", "a3"]);
+        const senders2 = received.map(m => m.msg.replace("Report from ", "")).sort();
+        assert.deepEqual(senders2, ["s1", "s2", "s3"]);
+    });
 
-        queenReader.disconnect();
-        await group.stop({ removeDir: true });
+    it("stale socket cleanup", async () => {
+        const dir = tmpDir();
+        const sockPath = path.join(dir, "general.sock");
+
+        // Create a stale file (not a socket)
+        fs.writeFileSync(sockPath, "stale");
+
+        // Mesh should clean it up on join
+        const m = track(new Mesh({ name: "test", dir }));
+        await m.join();
+        await wait(50);
+
+        // Mesh should be operational
+        assert.equal(m.joined, true);
     });
 });

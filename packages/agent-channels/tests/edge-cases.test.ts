@@ -159,31 +159,6 @@ describe("Edge cases", () => {
         await channel1.stop();
     });
 
-    it("group stop with connected clients doesn't crash", async () => {
-        const groupPath = path.join(
-            fs.mkdtempSync(path.join(os.tmpdir(), "edge-grp-")),
-            "group"
-        );
-
-        // Import ChannelGroup
-        const { ChannelGroup } = await import("../src/group.js");
-        const group = new ChannelGroup({
-            path: groupPath,
-            channels: [{ name: "general" }, { name: "inbox-a1" }],
-        });
-
-        await group.start();
-
-        // Connect clients to both channels
-        const c1 = track(new ChannelClient(path.join(groupPath, "general.sock")));
-        const c2 = track(new ChannelClient(path.join(groupPath, "inbox-a1.sock")));
-        await c1.connect();
-        await c2.connect();
-
-        // Stop the group — should not throw
-        await group.stop({ removeDir: true });
-    });
-
     it("client emits error for malformed server data", async () => {
         const sockPath = tmpSocketPath();
 
