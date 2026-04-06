@@ -4,4 +4,3 @@ export { Channel, type ChannelOptions } from "./channel.js";
 export { ChannelClient, type ChannelClientOptions } from "./client.js";
 export { SharedChannel, type SharedChannelOptions } from "./shared-channel.js";
 export { Mesh, type MeshOptions, type MessageMeta } from "./mesh.js";
-export { allOrCleanup } from "./util.js";
