@@ -32,6 +32,7 @@ export function detectTerminal(preference: string): TerminalType {
 
 /**
  * Build the pi command to run in the new terminal.
+ * The prompt is passed as a positional argument (user message), not via --append-system-prompt.
  */
 function buildPiCommand(
     prompt: string,
@@ -42,9 +43,10 @@ function buildPiCommand(
         .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
         .join(" ");
     const cdPart = cwd ? `cd ${JSON.stringify(cwd)} && ` : "";
-    // Escape the prompt for shell
+    // Escape the prompt for shell (single quote escaping)
     const escapedPrompt = prompt.replace(/'/g, "'\\''");
-    return `${cdPart}${envStr} pi --append-system-prompt '${escapedPrompt}'`;
+    // Pass prompt as user message, not as system prompt append
+    return `${cdPart}${envStr} pi '${escapedPrompt}'`;
 }
 
 /**
