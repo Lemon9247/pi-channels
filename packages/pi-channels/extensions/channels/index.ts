@@ -427,9 +427,134 @@ export default function channelsExtension(pi: any): void {
     // -- Command Registration --
 
     pi.registerCommand("channels", {
-        description: "Open channels overlay",
+        description: "Manage channels interactively",
         async handler(_args: string, ctx: any) {
-            await openChannelsOverlay(ctx);
+            if (!ctx?.hasUI) return;
+
+            // Auto-connect if not registered
+            if (!mesh) {
+                const msg = await connectToMesh();
+                ctx.ui.notify(msg, "info");
+            }
+
+            const action = await ctx.ui.select("Channels", [
+                "View Agents",
+                "View Channels",
+                "Send Message",
+                "Join Channel",
+                "Leave Channel",
+                "View Activity Feed",
+                "Open Chat Overlay",
+                "Spawn Session",
+            ]);
+
+            if (!action) return;
+
+            switch (action) {
+                case "View Agents": {
+                    const agents = registry.listAgents();
+                    if (agents.length === 0) {
+                        ctx.ui.notify("No agents registered", "info");
+                        return;
+                    }
+                    const lines = agents.map((a) => {
+                        const emoji = presence.statusEmoji(a.status);
+                        const suffix = a.name === agentName ? " (you)" : "";
+                        const branch = a.branch ? ` on ${a.branch}` : "";
+                        return `  ${emoji} ${a.name}${suffix}${branch}`;
+                    });
+                    ctx.ui.notify(["Agents:", ""].concat(lines).join("\n"), "info");
+                    break;
+                }
+
+                case "View Channels": {
+                    if (!mesh) {
+                        ctx.ui.notify("Not connected to mesh", "error");
+                        return;
+                    }
+                    const lines = mesh.channels.map((ch) => {
+                        const members = mesh.channelMembers(ch);
+                        return `  #${ch} (${members.length} members: ${members.join(", ")})`;
+                    });
+                    ctx.ui.notify(["Channels:", ""].concat(lines).join("\n"), "info");
+                    break;
+                }
+
+                case "Send Message": {
+                    if (!mesh) {
+                        ctx.ui.notify("Not connected to mesh", "error");
+                        return;
+                    }
+                    const channel = await ctx.ui.input("Channel", "Channel name (default: general)");
+                    const to = await ctx.ui.input("To", "Agent name for DM (leave empty for channel)");
+                    const message = await ctx.ui.input("Message", "Message to send");
+                    if (!message) return;
+
+                    const result = await executeTool(
+                        { action: "send", channel: channel || "general", to: to || undefined, message },
+                        { mesh, config, agentName, projectDir, connectToMesh },
+                    );
+                    ctx.ui.notify(result, "info");
+                    break;
+                }
+
+                case "Join Channel": {
+                    if (!mesh) {
+                        ctx.ui.notify("Not connected to mesh", "error");
+                        return;
+                    }
+                    const channel = await ctx.ui.input("Channel", "Channel name to join");
+                    if (!channel) return;
+                    const result = await executeTool(
+                        { action: "join", channel },
+                        { mesh, config, agentName, projectDir, connectToMesh },
+                    );
+                    ctx.ui.notify(result, "info");
+                    break;
+                }
+
+                case "Leave Channel": {
+                    if (!mesh) {
+                        ctx.ui.notify("Not connected to mesh", "error");
+                        return;
+                    }
+                    const channel = await ctx.ui.input("Channel", "Channel name to leave");
+                    if (!channel) return;
+                    const result = await executeTool(
+                        { action: "leave", channel },
+                        { mesh, config, agentName, projectDir, connectToMesh },
+                    );
+                    ctx.ui.notify(result, "info");
+                    break;
+                }
+
+                case "View Activity Feed": {
+                    const limitStr = await ctx.ui.input("Limit", "Number of events (default: 20)");
+                    const limit = limitStr ? parseInt(limitStr, 10) : 20;
+                    const result = await executeTool(
+                        { action: "feed", limit: isNaN(limit) ? 20 : limit },
+                        { mesh, config, agentName, projectDir, connectToMesh },
+                    );
+                    ctx.ui.notify(result, "info");
+                    break;
+                }
+
+                case "Open Chat Overlay": {
+                    await openChannelsOverlay(ctx);
+                    break;
+                }
+
+                case "Spawn Session": {
+                    const prompt = await ctx.ui.input("Prompt", "Prompt for new session");
+                    if (!prompt) return;
+                    const result = await executeTool(
+                        { action: "spawn", prompt },
+                        { mesh, config, agentName, projectDir, connectToMesh },
+                    );
+                    ctx.ui.notify(result, "info");
+                    break;
+                }
+            }
         },
     });
 

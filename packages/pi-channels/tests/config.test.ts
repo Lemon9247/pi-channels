@@ -7,13 +7,13 @@ import { shouldAutoRegister } from "../extensions/channels/config.js";
 import { DEFAULT_CONFIG, type ChannelsConfig } from "../extensions/channels/types.js";
 
 describe("shouldAutoRegister", () => {
-    it("returns false by default", () => {
-        assert.equal(shouldAutoRegister(DEFAULT_CONFIG, "/some/path"), false);
+    it("returns true by default (autoRegister: true)", () => {
+        assert.equal(shouldAutoRegister(DEFAULT_CONFIG, "/some/path"), true);
     });
 
-    it("returns true when autoRegister is true", () => {
-        const config = { ...DEFAULT_CONFIG, autoRegister: true };
-        assert.equal(shouldAutoRegister(config, "/any/path"), true);
+    it("returns false when autoRegister is explicitly false", () => {
+        const config = { ...DEFAULT_CONFIG, autoRegister: false };
+        assert.equal(shouldAutoRegister(config, "/any/path"), false);
     });
 
     it("returns true when PI_CHANNELS_AUTO_JOIN=1", () => {
@@ -27,27 +27,27 @@ describe("shouldAutoRegister", () => {
         }
     });
 
-    it("matches exact path in autoRegisterPaths", () => {
-        const config = { ...DEFAULT_CONFIG, autoRegisterPaths: ["/projects/team"] };
+    it("matches exact path in autoRegisterPaths (when autoRegister is false)", () => {
+        const config = { ...DEFAULT_CONFIG, autoRegister: false, autoRegisterPaths: ["/projects/team"] };
         assert.equal(shouldAutoRegister(config, "/projects/team"), true);
         assert.equal(shouldAutoRegister(config, "/projects/other"), false);
     });
 
-    it("matches subdirectory of path in autoRegisterPaths", () => {
-        const config = { ...DEFAULT_CONFIG, autoRegisterPaths: ["/projects/team"] };
+    it("matches subdirectory of path in autoRegisterPaths (when autoRegister is false)", () => {
+        const config = { ...DEFAULT_CONFIG, autoRegister: false, autoRegisterPaths: ["/projects/team"] };
         assert.equal(shouldAutoRegister(config, "/projects/team/subdir"), true);
     });
 
-    it("matches glob pattern with /*", () => {
-        const config = { ...DEFAULT_CONFIG, autoRegisterPaths: ["/projects/*"] };
+    it("matches glob pattern with /* (when autoRegister is false)", () => {
+        const config = { ...DEFAULT_CONFIG, autoRegister: false, autoRegisterPaths: ["/projects/*"] };
         assert.equal(shouldAutoRegister(config, "/projects/team"), true);
         assert.equal(shouldAutoRegister(config, "/projects/team/sub"), true);
         assert.equal(shouldAutoRegister(config, "/other"), false);
     });
 
-    it("expands ~ in paths", () => {
+    it("expands ~ in paths (when autoRegister is false)", () => {
         const home = os.homedir();
-        const config = { ...DEFAULT_CONFIG, autoRegisterPaths: [`~/projects`] };
+        const config = { ...DEFAULT_CONFIG, autoRegister: false, autoRegisterPaths: [`~/projects`] };
         assert.equal(shouldAutoRegister(config, `${home}/projects`), true);
     });
 });

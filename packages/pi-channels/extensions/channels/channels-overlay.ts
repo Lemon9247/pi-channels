@@ -66,9 +66,13 @@ export class ChannelsOverlay {
             return;
         }
 
-        // Escape — close overlay
-        if (data === "\x1b" || data === "\x1b\x1b") {
-            this.done();
+        // Escape — close overlay (handle both \x1b and char code 27)
+        if (data === "\x1b" || data === "\x1b\x1b" || data.charCodeAt(0) === 27) {
+            try {
+                this.done();
+            } catch (e) {
+                // Fallback: if done fails, just return
+            }
             return;
         }
 

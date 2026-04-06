@@ -30,7 +30,7 @@ export interface ChannelsConfig {
 }
 
 export const DEFAULT_CONFIG: ChannelsConfig = {
-    autoRegister: false,
+    autoRegister: true,  // Agents join meshes by default
     autoRegisterPaths: [],
     discovery: "project",
     nameTheme: "creatures",

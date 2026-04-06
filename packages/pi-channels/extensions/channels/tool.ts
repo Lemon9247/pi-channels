@@ -316,9 +316,16 @@ export async function executeTool(
                 env.PI_CHANNELS_JOIN = params.channels.join(",");
             }
 
+            // Child agents must spawn in same folder to join parent's mesh
+            // (Socket directory is based on folder hash)
+            const spawnCwd = params.cwd || projectDir;
+            if (spawnCwd !== projectDir) {
+                return `❌ Cannot spawn agent in different folder. Child agents must be in the same directory to join the mesh.\n   Parent: ${projectDir}\n   Requested: ${spawnCwd}`;
+            }
+
             const result = terminal.spawnTerminal({
                 prompt: params.prompt,
-                cwd: params.cwd,
+                cwd: projectDir,  // Force same folder as parent
                 terminal: config.terminal,
                 env,
             });
