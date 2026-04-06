@@ -11,8 +11,6 @@ export interface MeshOptions {
     name: string;
     /** Directory for socket files. Created if it doesn't exist. */
     dir: string;
-    /** History size for SharedChannels. Default: 100. */
-    historySize?: number;
 }
 
 export interface MessageMeta {
@@ -37,7 +35,6 @@ export interface MessageMeta {
 export class Mesh extends EventEmitter {
     private readonly _name: string;
     private readonly dir: string;
-    private readonly historySize: number;
 
     private sharedChannels: Map<string, SharedChannel> = new Map();
     private inbox: Channel | null = null;
@@ -47,7 +44,6 @@ export class Mesh extends EventEmitter {
         super();
         this._name = options.name;
         this.dir = options.dir;
-        this.historySize = options.historySize ?? 100;
     }
 
     /**
@@ -219,7 +215,6 @@ export class Mesh extends EventEmitter {
         const socketPath = path.join(this.dir, `${channelName}.sock`);
         const sc = new SharedChannel(socketPath, {
             name: this._name,
-            historySize: this.historySize,
             echoToSender: false,
         });
 
@@ -253,7 +248,6 @@ export class Mesh extends EventEmitter {
         const inboxPath = path.join(this.dir, `inbox-${this._name}.sock`);
         const inbox = new Channel({
             path: inboxPath,
-            historySize: 0,
         });
 
         await inbox.start();

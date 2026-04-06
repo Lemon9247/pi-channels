@@ -27,6 +27,8 @@ export interface ChannelsConfig {
     showWidget: boolean;
     /** Terminal for spawning: auto/tmux/kitty/etc. Default: "auto". */
     terminal: string;
+    /** Channels to auto-join on connect. Default: ["general"]. */
+    autoJoinChannels: string[];
 }
 
 export const DEFAULT_CONFIG: ChannelsConfig = {

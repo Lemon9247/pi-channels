@@ -185,7 +185,6 @@ async function connectToMesh(model?: string): Promise<string> {
     mesh = new Mesh({
         name: agentName,
         dir: socketDir,
-        historySize: 100,
     });
 
     // Wire up events

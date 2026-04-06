@@ -7,8 +7,6 @@ import { encode } from "./framing.js";
 export interface SharedChannelOptions {
     /** Identity name announced on connect. */
     name: string;
-    /** Number of recent messages to buffer when in server mode. Default: 0. */
-    historySize?: number;
     /** Whether to echo messages back to sender. Default: false. */
     echoToSender?: boolean;
 }
@@ -38,7 +36,6 @@ interface MemberInfo {
 export class SharedChannel extends EventEmitter {
     private readonly socketPath: string;
     private readonly _name: string;
-    private readonly historySize: number;
     private readonly echoToSender: boolean;
 
     private channel: Channel | null = null;
@@ -56,7 +53,6 @@ export class SharedChannel extends EventEmitter {
         super();
         this.socketPath = path;
         this._name = options.name;
-        this.historySize = options.historySize ?? 0;
         this.echoToSender = options.echoToSender ?? false;
     }
 
@@ -166,7 +162,6 @@ export class SharedChannel extends EventEmitter {
         const channel = new Channel({
             path: this.socketPath,
             echoToSender: this.echoToSender,
-            historySize: this.historySize,
         });
 
         await channel.start();

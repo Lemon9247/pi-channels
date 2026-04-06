@@ -133,7 +133,6 @@ export class Channel extends EventEmitter {
      */
     broadcast(msg: Message): void {
         const frame = encode(msg);
-        this.pushHistory(frame);
         if (this.clients.size === 0) {
             // Cap queue to prevent unbounded growth if client never connects
             if (this.messageQueue.length >= Channel.MAX_QUEUE_SIZE) {
@@ -277,14 +276,6 @@ export class Channel extends EventEmitter {
                 }
             });
         });
-    }
-
-    private pushHistory(frame: Buffer): void {
-        if (this.historySize <= 0) return;
-        this.historyBuffer.push(frame);
-        while (this.historyBuffer.length > this.historySize) {
-            this.historyBuffer.shift();
-        }
     }
 
     private unlinkSocket(): void {
