@@ -32,7 +32,7 @@ pi-channels/
 │           ├── terminal.ts      # Terminal spawning
 │           ├── overlay.ts       # Overlay state helpers
 │           ├── channels-overlay.ts # Interactive TUI overlay
-│           ├── tool.ts          # pi_channels tool
+│           ├── tool.ts          # msg / agent / channel / reserve tools
 │           └── types.ts         # Shared types
 ```
 
@@ -51,13 +51,14 @@ pi-channels/
 
 Start multiple pi sessions in the same project. They auto-register by default.
 
-Use the `pi_channels` tool:
+Use the tools directly:
 
 ```js
-pi_channels({ action: "send", message: "auth module done" })
-pi_channels({ action: "send", to: "BoldHare", message: "can you review?" })
-pi_channels({ action: "reserve", paths: ["src/auth/"], reason: "Refactoring" })
-pi_channels({ action: "spawn", prompt: "Fix the failing tests" })
+msg({ message: "auth module done" })
+msg({ to: "BoldHare", message: "can you review?" })
+reserve({ paths: ["src/auth/"], reason: "Refactoring" })
+agent({ action: "spawn", prompt: "Fix the failing tests" })
+channel({ action: "join", name: "testing" })
 ```
 
 ## Commands

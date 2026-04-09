@@ -7,8 +7,25 @@ import * as registry from "./registry.js";
 import * as reservations from "./reservations.js";
 import * as overlay from "./overlay.js";
 import { ChannelsOverlay } from "./channels-overlay.js";
-import { executeTool, toolDefinition } from "./tool.js";
-import { DEFAULT_CONFIG, type ChannelsConfig, type RegistryEntry, type ToolAction } from "./types.js";
+import {
+    agentToolDefinition,
+    channelToolDefinition,
+    executeAgentTool,
+    executeChannelTool,
+    executeMsgTool,
+    executeReserveTool,
+    msgToolDefinition,
+    reserveToolDefinition,
+} from "./tool.js";
+import {
+    DEFAULT_CONFIG,
+    type AgentParams,
+    type ChannelParams,
+    type ChannelsConfig,
+    type MsgParams,
+    type RegistryEntry,
+    type ReserveParams,
+} from "./types.js";
 
 interface SessionState {
     mesh: Mesh | null;
@@ -288,23 +305,32 @@ process.on("uncaughtException", (err) => {
 export default function channelsExtension(pi: any): void {
     state.piApi = pi;
 
-    pi.registerTool({
-        ...toolDefinition,
-        async execute(_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
-            state.latestCtx = ctx;
-            const result = await executeTool(params as ToolAction, {
-                get mesh() { return state.mesh; },
-                get config() { return state.config; },
-                get agentName() { return state.agentName; },
-                get projectDir() { return state.projectDir; },
-                connectToMesh,
-            });
-            return {
-                content: [{ type: "text", text: result }],
-                details: {},
-            };
-        },
+    const toolContext = () => ({
+        get mesh() { return state.mesh; },
+        get config() { return state.config; },
+        get agentName() { return state.agentName; },
+        get projectDir() { return state.projectDir; },
+        connectToMesh,
     });
+
+    const registerTextTool = (definition: any, run: (params: any) => Promise<string>) => {
+        pi.registerTool({
+            ...definition,
+            async execute(_toolCallId: string, params: any, _signal: any, _onUpdate: any, ctx: any) {
+                state.latestCtx = ctx;
+                const result = await run(params);
+                return {
+                    content: [{ type: "text", text: result }],
+                    details: {},
+                };
+            },
+        });
+    };
+
+    registerTextTool(msgToolDefinition, (params) => executeMsgTool(params as MsgParams, toolContext()));
+    registerTextTool(agentToolDefinition, (params) => executeAgentTool(params as AgentParams, toolContext()));
+    registerTextTool(channelToolDefinition, (params) => executeChannelTool(params as ChannelParams, toolContext()));
+    registerTextTool(reserveToolDefinition, (params) => executeReserveTool(params as ReserveParams, toolContext()));
 
     pi.registerCommand("channels", {
         description: "Manage channels interactively",
@@ -328,76 +354,53 @@ export default function channelsExtension(pi: any): void {
 
             switch (action) {
                 case "View Agents": {
-                    const agents = registry.listAgentsForProject(state.projectDir);
-                    if (agents.length === 0) {
-                        ctx.ui.notify("No agents registered", "info");
-                        return;
-                    }
-                    const lines = agents.map((agent) => {
-                        const emoji = registry.statusEmoji(agent.status);
-                        const suffix = agent.name === state.agentName ? " (you)" : "";
-                        const branch = agent.branch ? ` on ${agent.branch}` : "";
-                        return `  ${emoji} ${agent.name}${suffix}${branch}`;
-                    });
-                    ctx.ui.notify(["Agents:", ""].concat(lines).join("\n"), "info");
+                    const result = await executeAgentTool(
+                        { action: "list" },
+                        toolContext(),
+                    );
+                    ctx.ui.notify(result, "info");
                     break;
                 }
 
                 case "View Channels": {
-                    if (!state.mesh) {
-                        ctx.ui.notify("Not connected to mesh", "error");
-                        return;
-                    }
-                    const lines = state.mesh.channels.map((channel) => {
-                        const members = state.mesh!.channelMembers(channel);
-                        return `  #${channel} (${members.length} members: ${members.join(", ")})`;
-                    });
-                    ctx.ui.notify(["Channels:", ""].concat(lines).join("\n"), "info");
+                    const result = await executeChannelTool(
+                        { action: "list" },
+                        toolContext(),
+                    );
+                    ctx.ui.notify(result, "info");
                     break;
                 }
 
                 case "Send Message": {
-                    if (!state.mesh) {
-                        ctx.ui.notify("Not connected to mesh", "error");
-                        return;
-                    }
                     const channel = await ctx.ui.input("Channel", "Channel name (default: general)");
                     const to = await ctx.ui.input("To", "Agent name for DM (leave empty for channel)");
                     const message = await ctx.ui.input("Message", "Message to send");
                     if (!message) return;
-                    const result = await executeTool(
-                        { action: "send", channel: channel || "general", to: to || undefined, message },
-                        { mesh: state.mesh, config: state.config, agentName: state.agentName, projectDir: state.projectDir, connectToMesh },
+                    const result = await executeMsgTool(
+                        { channel: channel || undefined, to: to || undefined, message },
+                        toolContext(),
                     );
                     ctx.ui.notify(result, "info");
                     break;
                 }
 
                 case "Join Channel": {
-                    if (!state.mesh) {
-                        ctx.ui.notify("Not connected to mesh", "error");
-                        return;
-                    }
                     const channel = await ctx.ui.input("Channel", "Channel name to join");
                     if (!channel) return;
-                    const result = await executeTool(
-                        { action: "join", channel },
-                        { mesh: state.mesh, config: state.config, agentName: state.agentName, projectDir: state.projectDir, connectToMesh },
+                    const result = await executeChannelTool(
+                        { action: "join", name: channel },
+                        toolContext(),
                     );
                     ctx.ui.notify(result, "info");
                     break;
                 }
 
                 case "Leave Channel": {
-                    if (!state.mesh) {
-                        ctx.ui.notify("Not connected to mesh", "error");
-                        return;
-                    }
                     const channel = await ctx.ui.input("Channel", "Channel name to leave");
                     if (!channel) return;
-                    const result = await executeTool(
-                        { action: "leave", channel },
-                        { mesh: state.mesh, config: state.config, agentName: state.agentName, projectDir: state.projectDir, connectToMesh },
+                    const result = await executeChannelTool(
+                        { action: "leave", name: channel },
+                        toolContext(),
                     );
                     ctx.ui.notify(result, "info");
                     break;
@@ -411,9 +414,9 @@ export default function channelsExtension(pi: any): void {
                 case "Spawn Session": {
                     const prompt = await ctx.ui.input("Prompt", "Prompt for new session");
                     if (!prompt) return;
-                    const result = await executeTool(
+                    const result = await executeAgentTool(
                         { action: "spawn", prompt },
-                        { mesh: state.mesh, config: state.config, agentName: state.agentName, projectDir: state.projectDir, connectToMesh },
+                        toolContext(),
                     );
                     ctx.ui.notify(result, "info");
                     break;
@@ -452,7 +455,7 @@ export default function channelsExtension(pi: any): void {
                         `Reserved by: ${conflict.agent}`,
                         `Reason: "${conflict.reservation.reason}"`,
                         "",
-                        `Coordinate via pi_channels({ action: "send", to: "${conflict.agent}", message: "..." })`,
+                        `Coordinate via msg({ to: "${conflict.agent}", message: "..." })`,
                     ].join("\n"),
                 };
             }

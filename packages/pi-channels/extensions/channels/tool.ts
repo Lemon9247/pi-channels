@@ -1,44 +1,51 @@
 import { type Mesh } from "agent-channels";
-import { type ChannelsConfig, type ToolAction } from "./types.js";
+import { type AgentParams, type ChannelParams, type ChannelsConfig, type MsgParams, type ReserveParams } from "./types.js";
 import * as registry from "./registry.js";
 import * as reservations from "./reservations.js";
 import * as terminal from "./terminal.js";
 import { generateUniqueName } from "./names.js";
 
 const CHANNEL_NAME_REGEX = /^[a-zA-Z][a-zA-Z0-9_-]{0,31}$/;
-const ACTION_LIST = "connect, join, leave, send, list, status, whois, channels, reserve, release, spawn, set_status";
+const AGENT_ACTION_LIST = "list, whois, status, spawn";
+const CHANNEL_ACTION_LIST = "list, join, leave";
+const RESERVE_ACTION_LIST = "reserve, release";
 
-export const toolDefinition = {
-    name: "pi_channels",
-    description:
-        "Communicate with other pi sessions. Actions: connect, join, leave, send, list, status, whois, channels, reserve, release, spawn, set_status",
+export const msgToolDefinition = {
+    name: "msg",
+    description: "Send a channel message or DM to another pi session",
+    parameters: {
+        type: "object" as const,
+        properties: {
+            message: {
+                type: "string",
+                description: "Message content",
+            },
+            to: {
+                type: "string",
+                description: "Agent name for DM",
+            },
+            channel: {
+                type: "string",
+                description: "Channel name for group messages. Default: general",
+            },
+        },
+        required: ["message"],
+    },
+};
+
+export const agentToolDefinition = {
+    name: "agent",
+    description: "Inspect agents, check your session status, or spawn a new agent. Actions: list, whois, status, spawn",
     parameters: {
         type: "object" as const,
         properties: {
             action: {
                 type: "string",
-                description: `Action to perform: ${ACTION_LIST}`,
+                description: `Action to perform: ${AGENT_ACTION_LIST}`,
             },
-            channel: {
+            name: {
                 type: "string",
-                description: "Channel name (for join/leave/send). Default: general",
-            },
-            to: {
-                type: "string",
-                description: "Agent name for DM (send action)",
-            },
-            message: {
-                type: "string",
-                description: "Message content (send/set_status actions)",
-            },
-            paths: {
-                type: "array",
-                items: { type: "string" },
-                description: "File paths (reserve/release actions)",
-            },
-            reason: {
-                type: "string",
-                description: "Reason for reservation",
+                description: "Agent name (whois action)",
             },
             prompt: {
                 type: "string",
@@ -53,12 +60,51 @@ export const toolDefinition = {
                 items: { type: "string" },
                 description: "Channels for spawned session to auto-join",
             },
+        },
+        required: ["action"],
+    },
+};
+
+export const channelToolDefinition = {
+    name: "channel",
+    description: "List, join, or leave channels. Actions: list, join, leave",
+    parameters: {
+        type: "object" as const,
+        properties: {
+            action: {
+                type: "string",
+                description: `Action to perform: ${CHANNEL_ACTION_LIST}`,
+            },
             name: {
                 type: "string",
-                description: "Agent name (whois action)",
+                description: "Channel name for join/leave",
             },
         },
         required: ["action"],
+    },
+};
+
+export const reserveToolDefinition = {
+    name: "reserve",
+    description: "Reserve or release files for cooperative editing. Omit action or use 'reserve' to claim files; use 'release' to free them.",
+    parameters: {
+        type: "object" as const,
+        properties: {
+            action: {
+                type: "string",
+                description: `Optional action: ${RESERVE_ACTION_LIST}. Default: reserve`,
+            },
+            paths: {
+                type: "array",
+                items: { type: "string" },
+                description: "File paths to reserve or release",
+            },
+            reason: {
+                type: "string",
+                description: "Reason for reservation",
+            },
+        },
+        required: ["paths"],
     },
 };
 
@@ -70,64 +116,45 @@ export interface ToolContext {
     connectToMesh?: () => Promise<string>;
 }
 
-export async function executeTool(params: ToolAction, context: ToolContext): Promise<string> {
-    if (params.channel && !CHANNEL_NAME_REGEX.test(params.channel)) {
-        return `❌ Invalid channel name "${params.channel}". Use letters, digits, underscores, hyphens. Start with a letter. Max 32 chars.`;
+async function ensureMesh(context: ToolContext): Promise<Mesh | null> {
+    if (context.mesh) return context.mesh;
+    if (!context.connectToMesh) return null;
+    await context.connectToMesh();
+    return context.mesh;
+}
+
+function validateChannelName(name: string | undefined): string | null {
+    if (!name) return null;
+    if (!CHANNEL_NAME_REGEX.test(name)) {
+        return `❌ Invalid channel name "${name}". Use letters, digits, underscores, hyphens. Start with a letter. Max 32 chars.`;
+    }
+    return null;
+}
+
+export async function executeMsgTool(params: MsgParams, context: ToolContext): Promise<string> {
+    if (!params.message) return "❌ Specify a message.";
+    const nameError = validateChannelName(params.channel);
+    if (nameError) return nameError;
+
+    const mesh = await ensureMesh(context);
+    if (!mesh) return "❌ Not connected to mesh.";
+
+    if (params.to) {
+        try {
+            await mesh.sendTo(params.to, params.message);
+            return `✅ Sent DM to ${params.to}`;
+        } catch (err) {
+            return `❌ ${(err as Error).message}`;
+        }
     }
 
+    const channel = params.channel ?? "general";
+    mesh.send(params.message, { channel });
+    return `✅ Sent to #${channel}`;
+}
+
+export async function executeAgentTool(params: AgentParams, context: ToolContext): Promise<string> {
     switch (params.action) {
-        case "connect": {
-            if (context.mesh) return `Already connected as ${context.agentName}.`;
-            if (!context.connectToMesh) return "❌ Connect not available. Try reloading the extension.";
-            return await context.connectToMesh();
-        }
-
-        case "join": {
-            if (!context.mesh) {
-                if (!context.connectToMesh) {
-                    return "❌ Not connected to mesh. Use connect action first.";
-                }
-                await context.connectToMesh();
-            }
-
-            const mesh = context.mesh;
-            if (!mesh) return "❌ Not connected to mesh.";
-            if (!params.channel) {
-                return `Already in mesh. Channels: ${mesh.channels.join(", ")}`;
-            }
-
-            await mesh.join(params.channel);
-            mesh.send(`${context.agentName} joined #${params.channel}`, { channel: "general" });
-            registry.updateAgent(context.agentName, { channels: mesh.channels });
-            return `✅ Joined #${params.channel} (members: ${mesh.channelMembers(params.channel).join(", ")})`;
-        }
-
-        case "leave": {
-            const mesh = context.mesh;
-            if (!mesh) return "❌ Not connected to mesh. Use connect action or /channels command to connect.";
-            if (!params.channel) {
-                return "Specify a channel to leave, or use session shutdown to leave all.";
-            }
-            if (params.channel === "general") {
-                return "❌ Cannot leave #general.";
-            }
-
-            await mesh.leave(params.channel);
-            registry.updateAgent(context.agentName, { channels: mesh.channels });
-            return `✅ Left #${params.channel}`;
-        }
-
-        case "channels": {
-            const mesh = context.mesh;
-            if (!mesh) return "❌ Not connected to mesh. Use connect action or /channels command to connect.";
-
-            const lines = mesh.channels.map((channel) => {
-                const members = mesh.channelMembers(channel);
-                return `  #${channel} (${members.length} members: ${members.join(", ")})`;
-            });
-            return `📡 Channels:\n${lines.join("\n")}`;
-        }
-
         case "list": {
             const agents = registry.listAgentsForProject(context.projectDir);
             if (agents.length === 0) return "No agents registered.";
@@ -142,8 +169,8 @@ export async function executeTool(params: ToolAction, context: ToolContext): Pro
         }
 
         case "status": {
-            const mesh = context.mesh;
-            if (!mesh) return "❌ Not connected to mesh. Use connect action or /channels command to connect.";
+            const mesh = await ensureMesh(context);
+            if (!mesh) return "❌ Not connected to mesh.";
             const myEntry = registry.getAgent(context.agentName);
             const peers = mesh.allMembers().filter((name) => name !== context.agentName);
             const resCount = myEntry?.reservations.length ?? 0;
@@ -175,80 +202,13 @@ export async function executeTool(params: ToolAction, context: ToolContext): Pro
             ].filter(Boolean).join("\n");
         }
 
-        case "send": {
-            const mesh = context.mesh;
-            if (!mesh) return "❌ Not connected to mesh. Use connect action or /channels command to connect.";
-            if (!params.message) return "❌ Specify a message.";
-
-            if (params.to) {
-                try {
-                    await mesh.sendTo(params.to, params.message);
-                    return `✅ Sent DM to ${params.to}`;
-                } catch (err) {
-                    return `❌ ${(err as Error).message}`;
-                }
-            }
-
-            const channel = params.channel ?? "general";
-            mesh.send(params.message, { channel });
-            return `✅ Sent to #${channel}`;
-        }
-
-        case "set_status": {
-            const mesh = context.mesh;
-            if (!mesh) return "❌ Not connected to mesh. Use connect action or /channels command to connect.";
-            if (!params.message) return "❌ Specify a status message.";
-
-            mesh.send(`📋 ${context.agentName}: ${params.message}`);
-            return `✅ Status set: ${params.message}`;
-        }
-
-        case "reserve": {
-            const mesh = context.mesh;
-            if (!mesh) return "❌ Not connected to mesh. Use connect action or /channels command to connect.";
-            if (!params.paths?.length) return "❌ Specify paths to reserve.";
-
-            for (const value of params.paths) {
-                const conflict = reservations.checkConflict(value, context.agentName, context.projectDir);
-                if (conflict) {
-                    return [
-                        `❌ ${value}`,
-                        `   Reserved by: ${conflict.agent}`,
-                        `   Reason: "${conflict.reservation.reason}"`,
-                        "",
-                        `   Coordinate via pi_channels({ action: "send", to: "${conflict.agent}", message: "..." })`,
-                    ].join("\n");
-                }
-            }
-
-            const entry = registry.getAgent(context.agentName);
-            const nextReservations = reservations.addReservation(
-                entry?.reservations ?? [],
-                context.agentName,
-                params.paths,
-                params.reason ?? "Working on these files",
-            );
-            registry.updateAgent(context.agentName, { reservations: nextReservations });
-            mesh.send(`${context.agentName} reserved ${params.paths.join(", ")} — ${params.reason ?? "Working on these files"}`);
-            return `✅ Reserved: ${params.paths.join(", ")} (${params.reason ?? "Working on these files"})`;
-        }
-
-        case "release": {
-            const mesh = context.mesh;
-            if (!mesh) return "❌ Not connected to mesh. Use connect action or /channels command to connect.";
-
-            const entry = registry.getAgent(context.agentName);
-            const { kept, released } = reservations.releaseReservations(entry?.reservations ?? [], params.paths);
-            if (released.length === 0) return "No matching reservations to release.";
-
-            registry.updateAgent(context.agentName, { reservations: kept });
-            const releasedPaths = released.flatMap((reservation) => reservation.paths);
-            mesh.send(`${context.agentName} released ${releasedPaths.join(", ")}`);
-            return `✅ Released: ${releasedPaths.join(", ")}`;
-        }
-
         case "spawn": {
             if (!params.prompt) return "❌ Specify a prompt for the new session.";
+
+            if (!context.agentName) {
+                const mesh = await ensureMesh(context);
+                if (!mesh) return "❌ Not connected to mesh.";
+            }
 
             const newName = generateUniqueName(
                 context.config.nameTheme,
@@ -291,6 +251,109 @@ export async function executeTool(params: ToolAction, context: ToolContext): Pro
         }
 
         default:
-            return `❌ Unknown action: ${params.action}. Valid: ${ACTION_LIST}`;
+            return `❌ Unknown action: ${params.action}. Valid: ${AGENT_ACTION_LIST}`;
+    }
+}
+
+export async function executeChannelTool(params: ChannelParams, context: ToolContext): Promise<string> {
+    const nameError = validateChannelName(params.name);
+    if (nameError) return nameError;
+
+    switch (params.action) {
+        case "list": {
+            const mesh = await ensureMesh(context);
+            if (!mesh) return "❌ Not connected to mesh.";
+
+            const lines = mesh.channels.map((channel) => {
+                const members = mesh.channelMembers(channel);
+                return `  #${channel} (${members.length} members: ${members.join(", ")})`;
+            });
+            return `📡 Channels:\n${lines.join("\n")}`;
+        }
+
+        case "join": {
+            const mesh = await ensureMesh(context);
+            if (!mesh) return "❌ Not connected to mesh.";
+            if (!params.name) {
+                return `Already in mesh. Channels: ${mesh.channels.join(", ")}`;
+            }
+
+            await mesh.join(params.name);
+            mesh.send(`${context.agentName} joined #${params.name}`, { channel: "general" });
+            registry.updateAgent(context.agentName, { channels: mesh.channels });
+            return `✅ Joined #${params.name} (members: ${mesh.channelMembers(params.name).join(", ")})`;
+        }
+
+        case "leave": {
+            const mesh = await ensureMesh(context);
+            if (!mesh) return "❌ Not connected to mesh.";
+            if (!params.name) {
+                return "Specify a channel to leave, or use session shutdown to leave all.";
+            }
+            if (params.name === "general") {
+                return "❌ Cannot leave #general.";
+            }
+
+            await mesh.leave(params.name);
+            registry.updateAgent(context.agentName, { channels: mesh.channels });
+            return `✅ Left #${params.name}`;
+        }
+
+        default:
+            return `❌ Unknown action: ${params.action}. Valid: ${CHANNEL_ACTION_LIST}`;
+    }
+}
+
+export async function executeReserveTool(params: ReserveParams, context: ToolContext): Promise<string> {
+    const action = params.action ?? "reserve";
+
+    switch (action) {
+        case "reserve": {
+            const mesh = await ensureMesh(context);
+            if (!mesh) return "❌ Not connected to mesh.";
+            if (!params.paths?.length) return "❌ Specify paths to reserve.";
+
+            for (const value of params.paths) {
+                const conflict = reservations.checkConflict(value, context.agentName, context.projectDir);
+                if (conflict) {
+                    return [
+                        `❌ ${value}`,
+                        `   Reserved by: ${conflict.agent}`,
+                        `   Reason: "${conflict.reservation.reason}"`,
+                        "",
+                        `   Coordinate via msg({ to: "${conflict.agent}", message: "..." })`,
+                    ].join("\n");
+                }
+            }
+
+            const entry = registry.getAgent(context.agentName);
+            const nextReservations = reservations.addReservation(
+                entry?.reservations ?? [],
+                context.agentName,
+                params.paths,
+                params.reason ?? "Working on these files",
+            );
+            registry.updateAgent(context.agentName, { reservations: nextReservations });
+            mesh.send(`${context.agentName} reserved ${params.paths.join(", ")} — ${params.reason ?? "Working on these files"}`);
+            return `✅ Reserved: ${params.paths.join(", ")} (${params.reason ?? "Working on these files"})`;
+        }
+
+        case "release": {
+            const mesh = await ensureMesh(context);
+            if (!mesh) return "❌ Not connected to mesh.";
+            if (!params.paths?.length) return "❌ Specify paths to release.";
+
+            const entry = registry.getAgent(context.agentName);
+            const { kept, released } = reservations.releaseReservations(entry?.reservations ?? [], params.paths);
+            if (released.length === 0) return "No matching reservations to release.";
+
+            registry.updateAgent(context.agentName, { reservations: kept });
+            const releasedPaths = released.flatMap((reservation) => reservation.paths);
+            mesh.send(`${context.agentName} released ${releasedPaths.join(", ")}`);
+            return `✅ Released: ${releasedPaths.join(", ")}`;
+        }
+
+        default:
+            return `❌ Unknown action: ${action}. Valid: ${RESERVE_ACTION_LIST}`;
     }
 }
