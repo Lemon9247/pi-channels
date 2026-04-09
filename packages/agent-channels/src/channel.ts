@@ -104,6 +104,16 @@ class ChannelServer extends EventEmitter {
         return this.socketPath;
     }
 
+    flushQueueToClient(clientId: string): void {
+        const client = this.clients.get(clientId);
+        if (!client || this.messageQueue.length === 0) return;
+
+        for (const frame of this.messageQueue) {
+            this.writeToClient(client, frame);
+        }
+        this.messageQueue = [];
+    }
+
     private enqueue(frame: Buffer): void {
         if (this.messageQueue.length >= ChannelServer.MAX_QUEUE_SIZE) {
             this.messageQueue.shift();
@@ -121,13 +131,6 @@ class ChannelServer extends EventEmitter {
 
         this.clients.set(clientId, client);
         this.emit("connect", clientId);
-
-        if (this.messageQueue.length > 0) {
-            for (const frame of this.messageQueue) {
-                this.writeToClient(client, frame);
-            }
-            this.messageQueue = [];
-        }
 
         socket.on("data", (chunk: Buffer) => {
             let messages: Message[];
@@ -238,10 +241,17 @@ class ChannelClientConn extends EventEmitter {
     private decoder = new FrameDecoder();
     private connected = false;
     private stopping = false;
+    private pendingMessages: Message[] = [];
 
     constructor(socketPath: string) {
         super();
         this.socketPath = socketPath;
+
+        this.on("newListener", (eventName) => {
+            if (eventName === "message" && this.pendingMessages.length > 0) {
+                queueMicrotask(() => this.flushPendingMessages());
+            }
+        });
     }
 
     async connect(): Promise<void> {
@@ -271,7 +281,7 @@ class ChannelClientConn extends EventEmitter {
                 }
 
                 for (const msg of messages) {
-                    this.emit("message", msg);
+                    this.deliverMessage(msg);
                 }
             });
 
@@ -306,6 +316,7 @@ class ChannelClientConn extends EventEmitter {
         this.connected = false;
         this.socket = null;
         this.decoder.reset();
+        this.pendingMessages = [];
     }
 
     send(msg: Message): void {
@@ -313,6 +324,24 @@ class ChannelClientConn extends EventEmitter {
             throw new Error("Not connected");
         }
         this.socket.write(encode(msg));
+    }
+
+    private deliverMessage(msg: Message): void {
+        if (this.listenerCount("message") === 0) {
+            this.pendingMessages.push(msg);
+            return;
+        }
+        this.emit("message", msg);
+    }
+
+    private flushPendingMessages(): void {
+        if (this.listenerCount("message") === 0 || this.pendingMessages.length === 0) return;
+
+        const pending = this.pendingMessages;
+        this.pendingMessages = [];
+        for (const msg of pending) {
+            this.emit("message", msg);
+        }
     }
 }
 
@@ -340,12 +369,19 @@ export class Channel extends EventEmitter {
 
     private memberMap: Map<string, MemberInfo> = new Map();
     private knownMembers: Set<string> = new Set();
+    private pendingMessageEvents: Array<{ msg: Message; from: string }> = [];
 
     constructor(options: ChannelOptions) {
         super();
         this.socketPath = options.path;
         this._name = options.name;
         this.echoToSender = options.echoToSender ?? false;
+
+        this.on("newListener", (eventName) => {
+            if (eventName === "message" && this.pendingMessageEvents.length > 0) {
+                queueMicrotask(() => this.flushPendingMessageEvents());
+            }
+        });
     }
 
     async join(): Promise<void> {
@@ -389,6 +425,7 @@ export class Channel extends EventEmitter {
         }
 
         this._role = null;
+        this.pendingMessageEvents = [];
     }
 
     send(msg: Message): void {
@@ -403,14 +440,14 @@ export class Channel extends EventEmitter {
 
         if (this._role === "server" && this.server) {
             this.server.broadcast(enriched);
-            this.emit("message", enriched, (enriched.data?.from as string) ?? this._name);
+            this.emitChannelMessage(enriched, (enriched.data?.from as string) ?? this._name);
             return;
         }
 
         if (this._role === "client" && this.client) {
             this.client.send(enriched);
             if (!this.echoToSender) {
-                this.emit("message", enriched, (enriched.data?.from as string) ?? this._name);
+                this.emitChannelMessage(enriched, (enriched.data?.from as string) ?? this._name);
             }
             return;
         }
@@ -466,6 +503,7 @@ export class Channel extends EventEmitter {
                         members: this.members,
                     },
                 });
+                server.flushQueueToClient(clientId);
                 return;
             }
 
@@ -477,7 +515,7 @@ export class Channel extends EventEmitter {
             }
 
             const from = String(msg.data?.from ?? "unknown");
-            this.emit("message", msg, from);
+            this.emitChannelMessage(msg, from);
         });
 
         server.on("disconnect", (clientId: string) => {
@@ -499,16 +537,6 @@ export class Channel extends EventEmitter {
 
     private async startAsClient(): Promise<void> {
         const client = new ChannelClientConn(this.socketPath);
-        await client.connect();
-
-        this.client = client;
-        this._role = "client";
-        this.emit("role", "client");
-
-        client.send({
-            msg: `${this._name} identifying`,
-            data: { type: "system", event: "identify", name: this._name },
-        });
 
         client.on("message", (msg: Message) => {
             if (msg.data?.type === "system") {
@@ -539,7 +567,7 @@ export class Channel extends EventEmitter {
 
             const from = String(msg.data?.from ?? "unknown");
             if (from !== this._name || this.echoToSender) {
-                this.emit("message", msg, from);
+                this.emitChannelMessage(msg, from);
             }
         });
 
@@ -550,6 +578,17 @@ export class Channel extends EventEmitter {
 
         client.on("error", (err: Error) => {
             this.emit("error", err);
+        });
+
+        await client.connect();
+
+        this.client = client;
+        this._role = "client";
+        this.emit("role", "client");
+
+        client.send({
+            msg: `${this._name} identifying`,
+            data: { type: "system", event: "identify", name: this._name },
         });
     }
 
@@ -584,6 +623,24 @@ export class Channel extends EventEmitter {
 
         this._joined = false;
         this.emit("error", new Error("Failed to reconnect after server death"));
+    }
+
+    private emitChannelMessage(msg: Message, from: string): void {
+        if (this.listenerCount("message") === 0) {
+            this.pendingMessageEvents.push({ msg, from });
+            return;
+        }
+        this.emit("message", msg, from);
+    }
+
+    private flushPendingMessageEvents(): void {
+        if (this.listenerCount("message") === 0 || this.pendingMessageEvents.length === 0) return;
+
+        const pending = this.pendingMessageEvents;
+        this.pendingMessageEvents = [];
+        for (const entry of pending) {
+            this.emit("message", entry.msg, entry.from);
+        }
     }
 }
 
