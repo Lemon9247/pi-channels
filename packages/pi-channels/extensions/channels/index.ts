@@ -81,9 +81,9 @@ function updateStatusBar(ctx?: any): void {
     const theme = current.ui.theme;
 
     const nameStr = theme?.fg?.("accent", state.agentName) ?? state.agentName;
-    const countStr = theme?.fg?.("dim", ` (${peers} peer${peers === 1 ? "" : "s"})`) ?? ` (${peers} peers)`;
-    const unreadStr = unread > 0 ? (theme?.fg?.("accent", ` ●${unread}`) ?? ` ●${unread}`) : "";
-    current.ui.setStatus("channels", `ch: ${nameStr}${countStr}${unreadStr}`);
+    const countStr = theme?.fg?.("dim", ` · ${peers} ${peers === 1 ? "spirit" : "spirits"}`) ?? ` · ${peers} peer${peers === 1 ? "" : "s"}`;
+    const unreadStr = unread > 0 ? (theme?.fg?.("accent", ` ✧${unread}`) ?? ` ✧${unread}`) : "";
+    current.ui.setStatus("channels", `☸ ${nameStr}${countStr}${unreadStr}`);
 }
 
 function onMeshMessage(msg: Message, meta: MessageMeta): void {
@@ -122,7 +122,7 @@ function onMeshJoin(name: string, channel: string): void {
         const branchInfo = entry?.branch ? ` on ${entry.branch}` : "";
         const modelInfo = entry?.model ? `, ${entry.model}` : "";
         state.piApi.sendMessage(
-            { customType: "channels-system", content: `${name} joined #${channel} (${state.projectDir}${branchInfo}${modelInfo})`, display: false },
+            { customType: "channels-system", content: `☽ ${name} joined #${channel} (${state.projectDir}${branchInfo}${modelInfo})`, display: false },
             { triggerTurn: false },
         );
     }
@@ -142,7 +142,7 @@ function onMeshLeave(name: string, channel: string): void {
 
     if (state.config.chattiness !== "quiet") {
         state.piApi.sendMessage(
-            { customType: "channels-system", content: `${name} left #${channel}`, display: false },
+            { customType: "channels-system", content: `☾ ${name} departed #${channel}`, display: false },
             { triggerTurn: false },
         );
     }
@@ -211,11 +211,11 @@ async function connectToMesh(model?: string): Promise<string> {
     }, 15_000);
 
     const spawner = process.env.PI_CHANNELS_SPAWNED_BY;
-    const spawnNote = spawner ? ` (spawned by ${spawner})` : "";
+    const spawnNote = spawner ? ` (summoned by ${spawner})` : "";
     state.piApi?.sendMessage(
         {
             customType: "channels-system",
-            content: `Registered as ${state.agentName}${spawnNote} — ${mesh.allMembers().length} agents in mesh`,
+            content: `☽ ${state.agentName}${spawnNote} crossed the veil — ${mesh.allMembers().length} ${mesh.allMembers().length === 1 ? "spirit" : "spirits"} in the mesh`,
             display: false,
         },
         { triggerTurn: false },
@@ -232,7 +232,7 @@ async function initSession(cwd: string, model?: string): Promise<void> {
     const cleaned = registry.cleanupStaleEntries();
     if (cleaned.length > 0 && state.config.chattiness === "verbose" && state.piApi) {
         state.piApi.sendMessage(
-            { customType: "channels-system", content: `Cleaned ${cleaned.length} stale agent entries: ${cleaned.join(", ")}`, display: false },
+            { customType: "channels-system", content: `☾ ${cleaned.length} departed ${cleaned.length === 1 ? "spirit" : "spirits"} released from the mesh: ${cleaned.join(", ")}`, display: false },
             { triggerTurn: false },
         );
     }
@@ -480,7 +480,7 @@ export default function channelsExtension(pi: any): void {
         if (state.config.chattiness === "verbose" && state.mesh && registry.canSendAutoStatus()) {
             const toolCount = registry.getToolCount();
             if (toolCount > 10 && event.toolName === "edit") {
-                state.mesh.send(`${state.agentName} is on fire (${toolCount} edits this session)`);
+                state.mesh.send(`${state.agentName} is stirring (${toolCount} edits this session)`);
             }
         }
     });

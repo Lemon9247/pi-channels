@@ -1,5 +1,5 @@
 export type Chattiness = "quiet" | "normal" | "verbose";
-export type NameTheme = "creatures" | "nature" | "space" | "minimal" | "classic" | "custom";
+export type NameTheme = "creatures" | "nature" | "space" | "minimal" | "classic" | "occult" | "custom";
 
 export interface ChannelsConfig {
     /** Join mesh on session start. Default: true. */
@@ -21,7 +21,7 @@ export interface ChannelsConfig {
 export const DEFAULT_CONFIG: ChannelsConfig = {
     autoRegister: true,
     autoRegisterPaths: [],
-    nameTheme: "creatures",
+    nameTheme: "occult",
     nameWords: null,
     chattiness: "normal",
     terminal: "auto",

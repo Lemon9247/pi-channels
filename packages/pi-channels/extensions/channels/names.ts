@@ -44,6 +44,29 @@ const CLASSIC_NOUN = [
     "Tide", "Tower", "Wind", "Phoenix", "Sentinel", "Spark",
 ];
 
+// ─── Occult: The Underworld Register ─────────────────────────────────
+
+const OCCULT_ADJ = [
+    "Hollow", "Withered", "Pale", "Iron", "Ashen", "Obsidian",
+    "Waning", "Vespertine", "Twilit", "Gossamer", "Eldritch", "Umbral",
+    "Sigiled", "Rune", "Wraith", "Shroud", "Pale", "Vestal",
+    "Sepulchral", "Nadir", "Abyssal", "Liminal", "Chthonic",
+    "Spectral", "Phantom", "Veiled", "Stillborn", "Ephemeral",
+    "Charred", "Faded", "Spectral", "Dirge", "Feral", "Barrow",
+    "Lurid", "Sable", "Voided", "Eld", "Forsaken", "Sunken",
+];
+
+const OCCULT_NOUN = [
+    "Shade", "Wraith", "Ghost", "Specter", "Phantom", "Revenant",
+    "Wight", "Banshee", "Shade", "Spirit", "Haunt", "Ghoul",
+    "Crypt", "Barrow", "Cairn", "Monolith", "Obelisk", "Megalith",
+    "Candle", "Pyre", "Cenotaph", "Ossuary", "Reliquary", "Lantern",
+    "Sigil", "Glyph", "Rune", "Seal", "Ward", "Veil",
+    "Crossroads", "Threshhold", "Cairn", "Gate", "Abyss", "Well",
+    "Moth", "Owl", "Raven", "Spider", "Serpent", "Crow",
+    "Ash", "Ember", "Cinder", "Ichor", "Brimstone", "Frankincense",
+];
+
 // ─── Generator ──────────────────────────────────────────────────────
 
 function pick<T>(arr: T[]): T {
@@ -68,6 +91,8 @@ export function generateName(
             return pick(GREEK);
         case "classic":
             return pick(CLASSIC_ADJ) + pick(CLASSIC_NOUN);
+        case "occult":
+            return pick(OCCULT_ADJ) + pick(OCCULT_NOUN);
         case "custom":
             if (customWords?.adj?.length && customWords?.noun?.length) {
                 return pick(customWords.adj) + pick(customWords.noun);

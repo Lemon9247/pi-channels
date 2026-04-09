@@ -165,7 +165,7 @@ export async function executeAgentTool(params: AgentParams, context: ToolContext
                 const branch = agent.branch ? ` on ${agent.branch}` : "";
                 return `  ${emoji} ${agent.name}${suffix} — ${agent.cwd}${branch}`;
             });
-            return `👥 Agents:\n${lines.join("\n")}`;
+            return `☸ Agents:\n${lines.join("\n")}`;
         }
 
         case "status": {
@@ -175,7 +175,7 @@ export async function executeAgentTool(params: AgentParams, context: ToolContext
             const peers = mesh.allMembers().filter((name) => name !== context.agentName);
             const resCount = myEntry?.reservations.length ?? 0;
             return [
-                `🐾 ${context.agentName} — ${mesh.channels.length} channels, ${peers.length} peers`,
+                `☸ ${context.agentName} — ${mesh.channels.length} channels, ${peers.length} ${peers.length === 1 ? "spirit" : "spirits"}`,
                 `   Channels: ${mesh.channels.map((channel) => `#${channel}`).join(", ")}`,
                 `   Peers: ${peers.join(", ") || "none"}`,
                 `   Reservations: ${resCount}`,
@@ -268,7 +268,7 @@ export async function executeChannelTool(params: ChannelParams, context: ToolCon
                 const members = mesh.channelMembers(channel);
                 return `  #${channel} (${members.length} members: ${members.join(", ")})`;
             });
-            return `📡 Channels:\n${lines.join("\n")}`;
+            return `⊹ Channels:\n${lines.join("\n")}`;
         }
 
         case "join": {

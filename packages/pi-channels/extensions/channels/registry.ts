@@ -108,11 +108,11 @@ export function computeStatus(lastActivity: string): AgentStatus {
 export function statusEmoji(status: AgentStatus): string {
     switch (status) {
         case "active":
-            return "🟢";
+            return "☸";
         case "idle":
-            return "🟡";
+            return "☾";
         case "away":
-            return "🟠";
+            return "☽";
     }
 }
 

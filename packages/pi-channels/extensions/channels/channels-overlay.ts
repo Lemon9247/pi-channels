@@ -273,7 +273,7 @@ export class ChannelsOverlay {
         const row = (content: string) => border("│") + pad(" " + content, innerW) + border("│");
 
         const lines: string[] = [];
-        const title = this.theme.fg("accent", " Channels ");
+        const title = this.theme.fg("accent", " ☽ Mesh ");
         const agentInfo = this.ctx.agentName
             ? this.theme.fg("dim", ` ${this.ctx.agentName} `)
             : this.theme.fg("dim", " not connected ");
