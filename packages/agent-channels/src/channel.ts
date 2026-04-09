@@ -1,14 +1,16 @@
 import { EventEmitter } from "node:events";
-import * as net from "node:net";
 import * as fs from "node:fs";
+import * as net from "node:net";
 import * as path from "node:path";
-import { type Message } from "./message.js";
 import { encode, FrameDecoder } from "./framing.js";
+import { type Message } from "./message.js";
 
 export interface ChannelOptions {
     /** Path to the Unix domain socket file. */
     path: string;
-    /** Whether to echo messages back to the sender. Default: false. */
+    /** Identity name announced on connect. */
+    name: string;
+    /** Whether to echo messages back to sender. Default: false. */
     echoToSender?: boolean;
 }
 
@@ -18,145 +20,108 @@ interface ConnectedClient {
     decoder: FrameDecoder;
 }
 
-/**
- * A Channel is a Unix domain socket server that fans out messages
- * to all connected clients.
- *
- * When any client sends a message, every other connected client receives
- * it (sender excluded by default, configurable with `echoToSender`).
- *
- * Events:
- * - "message" (msg: Message, clientId: string) — a client sent a message
- * - "connect" (clientId: string) — a client connected
- * - "disconnect" (clientId: string) — a client disconnected
- * - "error" (err: Error) — server or client error
- */
-export class Channel extends EventEmitter {
+class ChannelServer extends EventEmitter {
     private static readonly MAX_QUEUE_SIZE = 1000;
+
     private readonly socketPath: string;
     private readonly echoToSender: boolean;
     private server: net.Server | null = null;
     private clients: Map<string, ConnectedClient> = new Map();
-    private _started = false;
+    private started = false;
     private nextClientId = 0;
     private messageQueue: Buffer[] = [];
 
-    constructor(options: ChannelOptions) {
+    constructor(socketPath: string, echoToSender: boolean) {
         super();
-        this.socketPath = options.path;
-        this.echoToSender = options.echoToSender ?? false;
+        this.socketPath = socketPath;
+        this.echoToSender = echoToSender;
     }
 
-    /** Start listening on the Unix domain socket. */
     async start(): Promise<void> {
-        if (this._started) {
-            throw new Error("Channel already started");
+        if (this.started) {
+            throw new Error("Channel server already started");
         }
 
-        // Handle stale sockets from crashed processes
         await this.cleanStaleSocket();
-
-        // Ensure parent directory exists
-        const dir = path.dirname(this.socketPath);
-        fs.mkdirSync(dir, { recursive: true });
+        fs.mkdirSync(path.dirname(this.socketPath), { recursive: true });
 
         return new Promise<void>((resolve, reject) => {
             const server = net.createServer((socket) => {
                 this.handleConnection(socket);
             });
 
-            const onStartError = (err: Error) => {
-                reject(err);
-            };
-
+            const onStartError = (err: Error) => reject(err);
             server.once("error", onStartError);
 
             server.listen(this.socketPath, () => {
                 server.removeListener("error", onStartError);
                 server.on("error", (err) => this.emit("error", err));
-                this._started = true;
                 this.server = server;
+                this.started = true;
                 resolve();
             });
         });
     }
 
-    /** Stop the channel, disconnect all clients, clean up socket file. */
     async stop(): Promise<void> {
-        if (!this._started) return;
+        if (!this.started) return;
+        this.started = false;
 
-        this._started = false;
-
-        // Disconnect all clients
         for (const client of this.clients.values()) {
             client.socket.destroy();
         }
         this.clients.clear();
 
-        // Close the server
         return new Promise<void>((resolve) => {
-            if (this.server) {
-                this.server.close(() => {
-                    this.unlinkSocket();
-                    this.server = null;
-                    resolve();
-                });
-            } else {
+            if (!this.server) {
+                this.unlinkSocket();
                 resolve();
+                return;
             }
+
+            this.server.close(() => {
+                this.server = null;
+                this.unlinkSocket();
+                resolve();
+            });
         });
     }
 
-    /** Number of connected clients. */
-    get clientCount(): number {
-        return this.clients.size;
-    }
-
-    /** Whether the channel is currently running. */
-    get started(): boolean {
-        return this._started;
-    }
-
-    /** The socket path this channel listens on. */
-    get path(): string {
-        return this.socketPath;
-    }
-
-    /**
-     * Inject a message from the server side (broadcast to all clients).
-     * No sender to exclude — everyone receives it.
-     *
-     * If no clients are connected, the message is queued and will be
-     * delivered to the first client that connects (solves the race
-     * condition where a channel is created but the agent hasn't
-     * connected yet).
-     */
     broadcast(msg: Message): void {
         const frame = encode(msg);
         if (this.clients.size === 0) {
-            // Cap queue to prevent unbounded growth if client never connects
-            if (this.messageQueue.length >= Channel.MAX_QUEUE_SIZE) {
-                this.messageQueue.shift();
-            }
-            this.messageQueue.push(frame);
+            this.enqueue(frame);
             return;
         }
-        // Snapshot to avoid map mutation during iteration (same as fanOut)
-        const snapshot = Array.from(this.clients.values());
-        for (const client of snapshot) {
+
+        const clients = Array.from(this.clients.values());
+        for (const client of clients) {
             this.writeToClient(client, frame);
         }
     }
 
+    get path(): string {
+        return this.socketPath;
+    }
+
+    private enqueue(frame: Buffer): void {
+        if (this.messageQueue.length >= ChannelServer.MAX_QUEUE_SIZE) {
+            this.messageQueue.shift();
+        }
+        this.messageQueue.push(frame);
+    }
+
     private handleConnection(socket: net.Socket): void {
         const clientId = `client-${this.nextClientId++}`;
-        const decoder = new FrameDecoder();
-        const client: ConnectedClient = { id: clientId, socket, decoder };
+        const client: ConnectedClient = {
+            id: clientId,
+            socket,
+            decoder: new FrameDecoder(),
+        };
 
         this.clients.set(clientId, client);
         this.emit("connect", clientId);
 
-        // Flush queued messages to newly connected client
         if (this.messageQueue.length > 0) {
             for (const frame of this.messageQueue) {
                 this.writeToClient(client, frame);
@@ -167,7 +132,7 @@ export class Channel extends EventEmitter {
         socket.on("data", (chunk: Buffer) => {
             let messages: Message[];
             try {
-                messages = decoder.push(chunk);
+                messages = client.decoder.push(chunk);
             } catch (err) {
                 this.emit("error", err instanceof Error ? err : new Error(String(err)));
                 this.disconnectClient(clientId);
@@ -185,7 +150,6 @@ export class Channel extends EventEmitter {
         });
 
         socket.on("error", (err) => {
-            // Suppress ECONNRESET — client just disconnected abruptly
             if ((err as NodeJS.ErrnoException).code !== "ECONNRESET") {
                 this.emit("error", err);
             }
@@ -195,22 +159,16 @@ export class Channel extends EventEmitter {
 
     private fanOut(msg: Message, senderId: string): void {
         const frame = encode(msg);
-        // Count eligible recipients (all except sender when echoToSender is off)
-        const snapshot = Array.from(this.clients.values());
-        const eligible = snapshot.filter(
-            (c) => this.echoToSender || c.id !== senderId,
+        const recipients = Array.from(this.clients.values()).filter(
+            (client) => this.echoToSender || client.id !== senderId,
         );
 
-        if (eligible.length === 0) {
-            // Cap queue to prevent unbounded growth if client never connects
-            if (this.messageQueue.length >= Channel.MAX_QUEUE_SIZE) {
-                this.messageQueue.shift();
-            }
-            this.messageQueue.push(frame);
+        if (recipients.length === 0) {
+            this.enqueue(frame);
             return;
         }
 
-        for (const client of eligible) {
+        for (const client of recipients) {
             this.writeToClient(client, frame);
         }
     }
@@ -221,7 +179,6 @@ export class Channel extends EventEmitter {
                 client.socket.write(frame);
             }
         } catch {
-            // Write failed (broken pipe, etc.) — disconnect the dead client
             this.disconnectClient(client.id);
         }
     }
@@ -237,17 +194,11 @@ export class Channel extends EventEmitter {
         this.emit("disconnect", clientId);
     }
 
-    /**
-     * Detect and clean stale sockets from crashed processes.
-     * If socket file exists and no process is listening (ECONNREFUSED),
-     * unlink it. If something is listening, throw — socket is in use.
-     */
     private async cleanStaleSocket(): Promise<void> {
         if (!fs.existsSync(this.socketPath)) return;
 
         return new Promise<void>((resolve, reject) => {
             const testSocket = net.connect(this.socketPath);
-
             const timeout = setTimeout(() => {
                 testSocket.destroy();
                 reject(new Error(`Timeout checking stale socket: ${this.socketPath}`));
@@ -255,20 +206,14 @@ export class Channel extends EventEmitter {
 
             testSocket.on("connect", () => {
                 clearTimeout(timeout);
-                // Something is listening — socket is in use
                 testSocket.destroy();
-                reject(
-                    new Error(
-                        `Socket already in use: ${this.socketPath}`
-                    )
-                );
+                reject(new Error(`Socket already in use: ${this.socketPath}`));
             });
 
             testSocket.on("error", (err) => {
                 clearTimeout(timeout);
                 const code = (err as NodeJS.ErrnoException).code;
                 if (code === "ECONNREFUSED" || code === "ENOTSOCK") {
-                    // Stale socket — safe to remove
                     this.unlinkSocket();
                     resolve();
                 } else {
@@ -282,7 +227,366 @@ export class Channel extends EventEmitter {
         try {
             fs.unlinkSync(this.socketPath);
         } catch {
-            // Ignore — file may already be gone
+            // Best effort.
         }
     }
+}
+
+class ChannelClientConn extends EventEmitter {
+    private readonly socketPath: string;
+    private socket: net.Socket | null = null;
+    private decoder = new FrameDecoder();
+    private connected = false;
+    private stopping = false;
+
+    constructor(socketPath: string) {
+        super();
+        this.socketPath = socketPath;
+    }
+
+    async connect(): Promise<void> {
+        if (this.connected) {
+            throw new Error("Already connected");
+        }
+        this.stopping = false;
+
+        return new Promise<void>((resolve, reject) => {
+            const socket = net.connect(this.socketPath);
+
+            socket.on("connect", () => {
+                this.socket = socket;
+                this.connected = true;
+                this.emit("connect");
+                resolve();
+            });
+
+            socket.on("data", (chunk: Buffer) => {
+                let messages: Message[];
+                try {
+                    messages = this.decoder.push(chunk);
+                } catch (err) {
+                    this.emit("error", err instanceof Error ? err : new Error(String(err)));
+                    this.disconnect();
+                    return;
+                }
+
+                for (const msg of messages) {
+                    this.emit("message", msg);
+                }
+            });
+
+            socket.on("close", () => {
+                const wasConnected = this.connected;
+                this.connected = false;
+                this.socket = null;
+                this.decoder.reset();
+                if (wasConnected && !this.stopping) {
+                    this.emit("disconnect");
+                }
+            });
+
+            socket.on("error", (err) => {
+                if (!this.connected) {
+                    reject(err);
+                } else if ((err as NodeJS.ErrnoException).code !== "ECONNRESET") {
+                    this.emit("error", err);
+                }
+            });
+        });
+    }
+
+    disconnect(): void {
+        this.stopping = true;
+        if (this.socket) {
+            this.socket.removeAllListeners();
+            if (!this.socket.destroyed) {
+                this.socket.destroy();
+            }
+        }
+        this.connected = false;
+        this.socket = null;
+        this.decoder.reset();
+    }
+
+    send(msg: Message): void {
+        if (!this.connected || !this.socket || this.socket.destroyed) {
+            throw new Error("Not connected");
+        }
+        this.socket.write(encode(msg));
+    }
+}
+
+interface MemberInfo {
+    clientId: string;
+    name: string;
+}
+
+/**
+ * A Channel is a named shared pub/sub group over a Unix socket.
+ *
+ * On join it tries to become the server first; if the socket already exists,
+ * it connects as a client instead. If the server dies, clients race to promote.
+ */
+export class Channel extends EventEmitter {
+    private readonly socketPath: string;
+    private readonly _name: string;
+    private readonly echoToSender: boolean;
+
+    private server: ChannelServer | null = null;
+    private client: ChannelClientConn | null = null;
+    private _role: "server" | "client" | null = null;
+    private _joined = false;
+    private stopping = false;
+
+    private memberMap: Map<string, MemberInfo> = new Map();
+    private knownMembers: Set<string> = new Set();
+
+    constructor(options: ChannelOptions) {
+        super();
+        this.socketPath = options.path;
+        this._name = options.name;
+        this.echoToSender = options.echoToSender ?? false;
+    }
+
+    async join(): Promise<void> {
+        if (this._joined) return;
+        this.stopping = false;
+
+        try {
+            await this.startAsServer();
+        } catch {
+            await this.startAsClient();
+        }
+
+        this._joined = true;
+    }
+
+    async leave(): Promise<void> {
+        if (!this._joined) return;
+        this.stopping = true;
+        this._joined = false;
+
+        if (this._role === "server" && this.server) {
+            this.server.broadcast({
+                msg: `${this._name} left`,
+                data: { type: "system", event: "leave", name: this._name },
+            });
+            await this.server.stop();
+            this.server = null;
+            this.memberMap.clear();
+        } else if (this._role === "client" && this.client) {
+            try {
+                this.client.send({
+                    msg: `${this._name} left`,
+                    data: { type: "system", event: "leave", name: this._name },
+                });
+            } catch {
+                // Already gone.
+            }
+            this.client.disconnect();
+            this.client = null;
+            this.knownMembers.clear();
+        }
+
+        this._role = null;
+    }
+
+    send(msg: Message): void {
+        if (!this._joined) {
+            throw new Error("Not joined");
+        }
+
+        const enriched: Message = {
+            msg: msg.msg,
+            data: { from: this._name, ...msg.data },
+        };
+
+        if (this._role === "server" && this.server) {
+            this.server.broadcast(enriched);
+            this.emit("message", enriched, (enriched.data?.from as string) ?? this._name);
+            return;
+        }
+
+        if (this._role === "client" && this.client) {
+            this.client.send(enriched);
+            if (!this.echoToSender) {
+                this.emit("message", enriched, (enriched.data?.from as string) ?? this._name);
+            }
+            return;
+        }
+
+        throw new Error("Channel is not connected");
+    }
+
+    get members(): string[] {
+        if (this._role === "server") {
+            return [this._name, ...Array.from(this.memberMap.values()).map((member) => member.name)];
+        }
+        return [this._name, ...Array.from(this.knownMembers)];
+    }
+
+    get role(): "server" | "client" | null {
+        return this._role;
+    }
+
+    get joined(): boolean {
+        return this._joined;
+    }
+
+    get name(): string {
+        return this._name;
+    }
+
+    get path(): string {
+        return this.socketPath;
+    }
+
+    private async startAsServer(): Promise<void> {
+        const server = new ChannelServer(this.socketPath, this.echoToSender);
+        await server.start();
+
+        this.server = server;
+        this._role = "server";
+        this.emit("role", "server");
+
+        server.on("message", (msg: Message, clientId: string) => {
+            if (msg.data?.type === "system" && msg.data?.event === "identify") {
+                const name = String(msg.data.name ?? "unknown");
+                this.memberMap.set(clientId, { clientId, name });
+                server.broadcast({
+                    msg: `${name} joined`,
+                    data: { type: "system", event: "join", name },
+                });
+                this.emit("join", name);
+                server.broadcast({
+                    msg: "member_list",
+                    data: {
+                        type: "system",
+                        event: "member_list",
+                        members: this.members,
+                    },
+                });
+                return;
+            }
+
+            if (msg.data?.type === "system" && msg.data?.event === "leave") {
+                const name = String(msg.data.name ?? "unknown");
+                this.memberMap.delete(clientId);
+                this.emit("leave", name);
+                return;
+            }
+
+            const from = String(msg.data?.from ?? "unknown");
+            this.emit("message", msg, from);
+        });
+
+        server.on("disconnect", (clientId: string) => {
+            const member = this.memberMap.get(clientId);
+            if (!member) return;
+
+            this.memberMap.delete(clientId);
+            server.broadcast({
+                msg: `${member.name} left`,
+                data: { type: "system", event: "leave", name: member.name },
+            });
+            this.emit("leave", member.name);
+        });
+
+        server.on("error", (err: Error) => {
+            this.emit("error", err);
+        });
+    }
+
+    private async startAsClient(): Promise<void> {
+        const client = new ChannelClientConn(this.socketPath);
+        await client.connect();
+
+        this.client = client;
+        this._role = "client";
+        this.emit("role", "client");
+
+        client.send({
+            msg: `${this._name} identifying`,
+            data: { type: "system", event: "identify", name: this._name },
+        });
+
+        client.on("message", (msg: Message) => {
+            if (msg.data?.type === "system") {
+                const event = String(msg.data.event ?? "");
+                if (event === "join") {
+                    const name = String(msg.data.name ?? "unknown");
+                    if (name !== this._name) {
+                        this.knownMembers.add(name);
+                        this.emit("join", name);
+                    }
+                } else if (event === "leave") {
+                    const name = String(msg.data.name ?? "unknown");
+                    if (name !== this._name) {
+                        this.knownMembers.delete(name);
+                        this.emit("leave", name);
+                    }
+                } else if (event === "member_list") {
+                    const members = Array.isArray(msg.data.members) ? msg.data.members : [];
+                    this.knownMembers.clear();
+                    for (const member of members) {
+                        if (member !== this._name && typeof member === "string") {
+                            this.knownMembers.add(member);
+                        }
+                    }
+                }
+                return;
+            }
+
+            const from = String(msg.data?.from ?? "unknown");
+            if (from !== this._name || this.echoToSender) {
+                this.emit("message", msg, from);
+            }
+        });
+
+        client.on("disconnect", () => {
+            if (this.stopping || !this._joined) return;
+            void this.attemptPromotion();
+        });
+
+        client.on("error", (err: Error) => {
+            this.emit("error", err);
+        });
+    }
+
+    private async attemptPromotion(): Promise<void> {
+        if (this.stopping || !this._joined) return;
+
+        if (this.client) {
+            this.client.disconnect();
+            this.client = null;
+        }
+        this.knownMembers.clear();
+        this._role = null;
+
+        await wait(50 + Math.random() * 250);
+        if (this.stopping || !this._joined) return;
+
+        try {
+            await this.startAsServer();
+            return;
+        } catch {
+            for (let attempt = 0; attempt < 5; attempt++) {
+                if (this.stopping || !this._joined) return;
+                await wait(100 + Math.random() * 200);
+                try {
+                    await this.startAsClient();
+                    return;
+                } catch {
+                    // Keep trying.
+                }
+            }
+        }
+
+        this._joined = false;
+        this.emit("error", new Error("Failed to reconnect after server death"));
+    }
+}
+
+function wait(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }

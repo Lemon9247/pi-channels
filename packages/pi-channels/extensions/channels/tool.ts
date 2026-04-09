@@ -2,29 +2,22 @@ import { type Mesh } from "agent-channels";
 import { type ChannelsConfig, type ToolAction } from "./types.js";
 import * as registry from "./registry.js";
 import * as reservations from "./reservations.js";
-import * as presence from "./presence.js";
-import * as feed from "./feed.js";
 import * as terminal from "./terminal.js";
 import { generateUniqueName } from "./names.js";
-import { loadConfig, saveConfigValue } from "./config.js";
 
-/** Valid channel name: starts with letter, letters/digits/underscore/hyphen, 1-32 chars. */
 const CHANNEL_NAME_REGEX = /^[a-zA-Z][a-zA-Z0-9_-]{0,31}$/;
+const ACTION_LIST = "connect, join, leave, send, list, status, whois, channels, reserve, release, spawn, set_status";
 
-/**
- * The pi_channels tool definition (for pi's tool registration).
- */
 export const toolDefinition = {
     name: "pi_channels",
     description:
-        "Communicate with other pi sessions. Actions: connect, join, leave, send, list, status, whois, channels, feed, reserve, release, spawn, set_status, rename, config.show, config.set",
+        "Communicate with other pi sessions. Actions: connect, join, leave, send, list, status, whois, channels, reserve, release, spawn, set_status",
     parameters: {
         type: "object" as const,
         properties: {
             action: {
                 type: "string",
-                description:
-                    "Action to perform: connect | join | leave | send | list | status | whois | channels | feed | reserve | release | spawn | set_status | rename | config.show | config.set",
+                description: `Action to perform: ${ACTION_LIST}`,
             },
             channel: {
                 type: "string",
@@ -62,128 +55,101 @@ export const toolDefinition = {
             },
             name: {
                 type: "string",
-                description: "Agent name (whois/rename actions)",
-            },
-            limit: {
-                type: "number",
-                description: "Number of events (feed action). Default: 20",
-            },
-            key: {
-                type: "string",
-                description: "Config key (config.set action)",
-            },
-            value: {
-                description: "Config value (config.set action)",
+                description: "Agent name (whois action)",
             },
         },
         required: ["action"],
     },
 };
 
-/**
- * Execute a pi_channels tool action.
- */
-export async function executeTool(
-    params: ToolAction,
-    context: {
-        mesh: Mesh | null;
-        config: ChannelsConfig;
-        agentName: string;
-        projectDir: string;
-        connectToMesh?: () => Promise<string>;
-    },
-): Promise<string> {
-    const { mesh, config, agentName, projectDir } = context;
+export interface ToolContext {
+    mesh: Mesh | null;
+    config: ChannelsConfig;
+    agentName: string;
+    projectDir: string;
+    connectToMesh?: () => Promise<string>;
+}
 
-    // Validate channel name format
+export async function executeTool(params: ToolAction, context: ToolContext): Promise<string> {
     if (params.channel && !CHANNEL_NAME_REGEX.test(params.channel)) {
         return `❌ Invalid channel name "${params.channel}". Use letters, digits, underscores, hyphens. Start with a letter. Max 32 chars.`;
     }
 
     switch (params.action) {
-        // ─── Coordination ────────────────────────────────────────
-
         case "connect": {
-            if (mesh) return `Already connected as ${agentName}.`;
+            if (context.mesh) return `Already connected as ${context.agentName}.`;
             if (!context.connectToMesh) return "❌ Connect not available. Try reloading the extension.";
             return await context.connectToMesh();
         }
 
         case "join": {
-            if (!mesh) {
-                if (context.connectToMesh) {
-                    const result = await context.connectToMesh();
-                    // Re-read mesh from context after connecting — but since mesh is
-                    // a module-level var in index.ts, we need to proceed with the
-                    // channel join in the next call. Return connect result + hint.
-                    return result + (params.channel ? `\nNow use join again to join #${params.channel}.` : "");
+            if (!context.mesh) {
+                if (!context.connectToMesh) {
+                    return "❌ Not connected to mesh. Use connect action first.";
                 }
-                return "❌ Not connected to mesh. Use connect action first.";
+                await context.connectToMesh();
             }
 
-            if (params.channel) {
-                await mesh.join(params.channel);
-
-                // Announce channel creation on general
-                mesh.send(`${agentName} joined #${params.channel}`, { channel: "general" });
-                feed.appendEvent(projectDir, "join", agentName, `Joined #${params.channel}`);
-
-                // Update registry
-                registry.updateAgent(agentName, { channels: mesh.channels });
-
-                return `✅ Joined #${params.channel} (members: ${mesh.channelMembers(params.channel).join(", ")})`;
+            const mesh = context.mesh;
+            if (!mesh) return "❌ Not connected to mesh.";
+            if (!params.channel) {
+                return `Already in mesh. Channels: ${mesh.channels.join(", ")}`;
             }
 
-            return `Already in mesh. Channels: ${mesh.channels.join(", ")}`;
+            await mesh.join(params.channel);
+            mesh.send(`${context.agentName} joined #${params.channel}`, { channel: "general" });
+            registry.updateAgent(context.agentName, { channels: mesh.channels });
+            return `✅ Joined #${params.channel} (members: ${mesh.channelMembers(params.channel).join(", ")})`;
         }
 
         case "leave": {
+            const mesh = context.mesh;
             if (!mesh) return "❌ Not connected to mesh. Use connect action or /channels command to connect.";
-
-            if (params.channel) {
-                if (params.channel === "general") {
-                    return "❌ Cannot leave #general.";
-                }
-                await mesh.leave(params.channel);
-                feed.appendEvent(projectDir, "leave", agentName, `Left #${params.channel}`);
-                registry.updateAgent(agentName, { channels: mesh.channels });
-                return `✅ Left #${params.channel}`;
+            if (!params.channel) {
+                return "Specify a channel to leave, or use session shutdown to leave all.";
+            }
+            if (params.channel === "general") {
+                return "❌ Cannot leave #general.";
             }
 
-            return "Specify a channel to leave, or use session shutdown to leave all.";
+            await mesh.leave(params.channel);
+            registry.updateAgent(context.agentName, { channels: mesh.channels });
+            return `✅ Left #${params.channel}`;
         }
 
         case "channels": {
+            const mesh = context.mesh;
             if (!mesh) return "❌ Not connected to mesh. Use connect action or /channels command to connect.";
 
-            const lines = mesh.channels.map((ch) => {
-                const members = mesh.channelMembers(ch);
-                return `  #${ch} (${members.length} members: ${members.join(", ")})`;
+            const lines = mesh.channels.map((channel) => {
+                const members = mesh.channelMembers(channel);
+                return `  #${channel} (${members.length} members: ${members.join(", ")})`;
             });
             return `📡 Channels:\n${lines.join("\n")}`;
         }
 
         case "list": {
-            const agents = registry.listAgentsForProject(projectDir);
+            const agents = registry.listAgentsForProject(context.projectDir);
             if (agents.length === 0) return "No agents registered.";
 
-            const lines = agents.map((a) => {
-                const emoji = presence.statusEmoji(a.status);
-                const suffix = a.name === agentName ? " (you)" : "";
-                const branch = a.branch ? ` on ${a.branch}` : "";
-                return `  ${emoji} ${a.name}${suffix} — ${a.cwd}${branch}`;
+            const lines = agents.map((agent) => {
+                const emoji = registry.statusEmoji(agent.status);
+                const suffix = agent.name === context.agentName ? " (you)" : "";
+                const branch = agent.branch ? ` on ${agent.branch}` : "";
+                return `  ${emoji} ${agent.name}${suffix} — ${agent.cwd}${branch}`;
             });
             return `👥 Agents:\n${lines.join("\n")}`;
         }
 
         case "status": {
+            const mesh = context.mesh;
             if (!mesh) return "❌ Not connected to mesh. Use connect action or /channels command to connect.";
-            const myEntry = registry.getAgent(agentName);
-            const peers = mesh.allMembers().filter((n) => n !== agentName);
-            const resCount = myEntry?.reservations?.length ?? 0;
+            const myEntry = registry.getAgent(context.agentName);
+            const peers = mesh.allMembers().filter((name) => name !== context.agentName);
+            const resCount = myEntry?.reservations.length ?? 0;
             return [
-                `🐾 ${agentName} — ${mesh.channels.length} channels, ${peers.length} peers`,
-                `   Channels: ${mesh.channels.map((c) => `#${c}`).join(", ")}`,
+                `🐾 ${context.agentName} — ${mesh.channels.length} channels, ${peers.length} peers`,
+                `   Channels: ${mesh.channels.map((channel) => `#${channel}`).join(", ")}`,
                 `   Peers: ${peers.join(", ") || "none"}`,
                 `   Reservations: ${resCount}`,
             ].join("\n");
@@ -193,7 +159,7 @@ export async function executeTool(
             if (!params.name) return "❌ Specify a name.";
             const agent = registry.getAgent(params.name);
             if (!agent) return `❌ Unknown agent: ${params.name}`;
-            const emoji = presence.statusEmoji(agent.status);
+            const emoji = registry.statusEmoji(agent.status);
             return [
                 `${emoji} ${agent.name}`,
                 `   CWD: ${agent.cwd}`,
@@ -203,190 +169,128 @@ export async function executeTool(
                 `   Last active: ${agent.lastActivity}`,
                 `   Channels: ${agent.channels.join(", ")}`,
                 agent.reservations.length > 0
-                    ? `   Reservations: ${agent.reservations.map((r) => r.paths.join(", ")).join("; ")}`
+                    ? `   Reservations: ${agent.reservations.map((reservation) => reservation.paths.join(", ")).join("; ")}`
                     : null,
                 agent.spawnedBy ? `   Spawned by: ${agent.spawnedBy}` : null,
-            ]
-                .filter(Boolean)
-                .join("\n");
+            ].filter(Boolean).join("\n");
         }
-
-        case "feed": {
-            const limit = params.limit ?? 20;
-            const events = feed.readEvents(projectDir, limit);
-            if (events.length === 0) return "No activity yet.";
-
-            const lines = events.map((e) => {
-                const time = new Date(e.timestamp).toLocaleTimeString();
-                return `  [${time}] ${e.agent}: ${e.type}${e.detail ? ` — ${e.detail}` : ""}`;
-            });
-            return `📜 Activity Feed (last ${events.length}):\n${lines.join("\n")}`;
-        }
-
-        // ─── Messaging ──────────────────────────────────────────
 
         case "send": {
+            const mesh = context.mesh;
             if (!mesh) return "❌ Not connected to mesh. Use connect action or /channels command to connect.";
             if (!params.message) return "❌ Specify a message.";
 
             if (params.to) {
-                // DM
                 try {
                     await mesh.sendTo(params.to, params.message);
-                    feed.appendEvent(projectDir, "message", agentName, `DM to ${params.to}: ${params.message}`);
                     return `✅ Sent DM to ${params.to}`;
                 } catch (err) {
                     return `❌ ${(err as Error).message}`;
                 }
             }
 
-            // Channel message
             const channel = params.channel ?? "general";
             mesh.send(params.message, { channel });
-            feed.appendEvent(projectDir, "message", agentName, `#${channel}: ${params.message}`);
             return `✅ Sent to #${channel}`;
         }
 
         case "set_status": {
+            const mesh = context.mesh;
             if (!mesh) return "❌ Not connected to mesh. Use connect action or /channels command to connect.";
             if (!params.message) return "❌ Specify a status message.";
 
-            mesh.send(`📋 ${agentName}: ${params.message}`);
+            mesh.send(`📋 ${context.agentName}: ${params.message}`);
             return `✅ Status set: ${params.message}`;
         }
 
-        // ─── Reservations ────────────────────────────────────────
-
         case "reserve": {
+            const mesh = context.mesh;
             if (!mesh) return "❌ Not connected to mesh. Use connect action or /channels command to connect.";
             if (!params.paths?.length) return "❌ Specify paths to reserve.";
 
-            // Check for conflicts first
-            for (const p of params.paths) {
-                const conflict = reservations.checkConflict(p, agentName, projectDir);
+            for (const value of params.paths) {
+                const conflict = reservations.checkConflict(value, context.agentName, context.projectDir);
                 if (conflict) {
                     return [
-                        `❌ ${p}`,
+                        `❌ ${value}`,
                         `   Reserved by: ${conflict.agent}`,
                         `   Reason: "${conflict.reservation.reason}"`,
-                        ``,
+                        "",
                         `   Coordinate via pi_channels({ action: "send", to: "${conflict.agent}", message: "..." })`,
                     ].join("\n");
                 }
             }
 
-            const reason = params.reason ?? "Working on these files";
-            const reservation = reservations.createReservation(agentName, params.paths, reason);
-
-            // Broadcast to general
-            mesh.send(`${agentName} reserved ${params.paths.join(", ")} — ${reason}`);
-
-            // Update registry
-            const myReservations = reservations.getReservations(agentName);
-            registry.updateAgent(agentName, { reservations: myReservations });
-
-            feed.appendEvent(projectDir, "reserve", agentName, params.paths.join(", "));
-            return `✅ Reserved: ${params.paths.join(", ")} (${reason})`;
+            const entry = registry.getAgent(context.agentName);
+            const nextReservations = reservations.addReservation(
+                entry?.reservations ?? [],
+                context.agentName,
+                params.paths,
+                params.reason ?? "Working on these files",
+            );
+            registry.updateAgent(context.agentName, { reservations: nextReservations });
+            mesh.send(`${context.agentName} reserved ${params.paths.join(", ")} — ${params.reason ?? "Working on these files"}`);
+            return `✅ Reserved: ${params.paths.join(", ")} (${params.reason ?? "Working on these files"})`;
         }
 
         case "release": {
+            const mesh = context.mesh;
             if (!mesh) return "❌ Not connected to mesh. Use connect action or /channels command to connect.";
 
-            const released = reservations.releaseReservation(agentName, params.paths);
+            const entry = registry.getAgent(context.agentName);
+            const { kept, released } = reservations.releaseReservations(entry?.reservations ?? [], params.paths);
             if (released.length === 0) return "No matching reservations to release.";
 
-            const releasedPaths = released.flatMap((r) => r.paths);
-
-            // Broadcast release
-            mesh.send(`${agentName} released ${releasedPaths.join(", ")}`);
-
-            // Update registry
-            const myReservations = reservations.getReservations(agentName);
-            registry.updateAgent(agentName, { reservations: myReservations });
-
-            feed.appendEvent(projectDir, "release", agentName, releasedPaths.join(", "));
+            registry.updateAgent(context.agentName, { reservations: kept });
+            const releasedPaths = released.flatMap((reservation) => reservation.paths);
+            mesh.send(`${context.agentName} released ${releasedPaths.join(", ")}`);
             return `✅ Released: ${releasedPaths.join(", ")}`;
         }
-
-        // ─── Spawn ──────────────────────────────────────────────
 
         case "spawn": {
             if (!params.prompt) return "❌ Specify a prompt for the new session.";
 
-            const newName = generateUniqueName(config.nameTheme, registry.registeredNames(), config.nameWords);
+            const newName = generateUniqueName(
+                context.config.nameTheme,
+                registry.registeredNames(),
+                context.config.nameWords,
+            );
 
             const env: Record<string, string> = {
-                PI_CHANNELS_AUTO_JOIN: "1",
-                PI_CHANNELS_SPAWNED_BY: agentName,
+                PI_CHANNELS_AUTO_REGISTER: "1",
+                PI_CHANNELS_SPAWNED_BY: context.agentName,
                 PI_AGENT_NAME: newName,
             };
             if (params.channels?.length) {
                 env.PI_CHANNELS_JOIN = params.channels.join(",");
             }
 
-            // Child agents must spawn in same folder to join parent's mesh
-            // (Socket directory is based on folder hash)
-            const spawnCwd = params.cwd || projectDir;
-            if (spawnCwd !== projectDir) {
-                return `❌ Cannot spawn agent in different folder. Child agents must be in the same directory to join the mesh.\n   Parent: ${projectDir}\n   Requested: ${spawnCwd}`;
+            const spawnCwd = params.cwd || context.projectDir;
+            if (spawnCwd !== context.projectDir) {
+                return `❌ Cannot spawn agent in different folder. Child agents must be in the same directory to join the mesh.\n   Parent: ${context.projectDir}\n   Requested: ${spawnCwd}`;
             }
 
             const result = terminal.spawnTerminal({
                 prompt: params.prompt,
-                cwd: projectDir,  // Force same folder as parent
-                terminal: config.terminal,
+                cwd: context.projectDir,
+                terminal: context.config.terminal,
                 env,
             });
 
-            feed.appendEvent(projectDir, "spawn", agentName, `Spawned ${newName}`);
-
             if (result.success) {
                 return `✅ Spawned ${newName} in ${result.terminal} terminal\n   Prompt: "${params.prompt}"`;
-            } else {
-                return [
-                    `⚠️ Could not auto-open terminal. Run this command manually:`,
-                    ``,
-                    `   ${result.command}`,
-                    ``,
-                    `   (Agent name: ${newName})`,
-                ].join("\n");
-            }
-        }
-
-        // ─── Config ─────────────────────────────────────────────
-
-        case "rename": {
-            if (!params.name) return "❌ Specify a new name.";
-            const existing = registry.registeredNames();
-            if (existing.has(params.name)) return `❌ Name "${params.name}" is already taken.`;
-
-            // Re-register with new name
-            const entry = registry.getAgent(agentName);
-            if (entry) {
-                registry.unregisterAgent(agentName);
-                entry.name = params.name;
-                registry.registerAgent(entry);
             }
 
-            return `✅ Renamed to ${params.name}`;
-        }
-
-        case "config.show": {
-            const lines = Object.entries(config).map(
-                ([k, v]) => `  ${k}: ${JSON.stringify(v)}`,
-            );
-            return `⚙️ Config:\n${lines.join("\n")}`;
-        }
-
-        case "config.set": {
-            if (!params.key) return "❌ Specify a config key.";
-            if (params.value === undefined) return "❌ Specify a value.";
-
-            saveConfigValue(params.key, params.value, projectDir);
-            return `✅ Set ${params.key} = ${JSON.stringify(params.value)}`;
+            return [
+                `⚠️ Could not auto-open terminal. Run this command manually:`,
+                "",
+                `   ${result.command}`,
+                "",
+                `   (Agent name: ${newName})`,
+            ].join("\n");
         }
 
         default:
-            return `❌ Unknown action: ${params.action}. Valid: connect, join, leave, send, list, status, whois, channels, feed, reserve, release, spawn, set_status, rename, config.show, config.set`;
+            return `❌ Unknown action: ${params.action}. Valid: ${ACTION_LIST}`;
     }
 }
