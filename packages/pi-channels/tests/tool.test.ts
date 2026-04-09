@@ -4,7 +4,12 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Mesh } from "agent-channels";
-import { executeTool } from "../extensions/channels/tool.js";
+import {
+    executeAgentTool,
+    executeChannelTool,
+    executeMsgTool,
+    executeReserveTool,
+} from "../extensions/channels/tool.js";
 import { DEFAULT_CONFIG } from "../extensions/channels/types.js";
 import * as registry from "../extensions/channels/registry.js";
 
@@ -12,7 +17,7 @@ function tmpDir(): string {
     return fs.mkdtempSync(path.join(os.tmpdir(), "tool-test-"));
 }
 
-describe("tool", () => {
+describe("tools", () => {
     let dir: string;
     let projectDir: string;
     let mesh: Mesh | null = null;
@@ -53,65 +58,65 @@ describe("tool", () => {
         });
     }
 
-    it("returns error when mesh is not connected", async () => {
-        const result = await executeTool({ action: "send", message: "hi" }, ctx());
+    it("msg errors when mesh is not connected", async () => {
+        const result = await executeMsgTool({ message: "hi" }, ctx());
         assert.ok(result.includes("❌"));
     });
 
-    it("lists channels", async () => {
+    it("channel lists channels", async () => {
         mesh = new Mesh({ name: "TestAgent", dir });
         await mesh.join();
         registerAgent("TestAgent", [], mesh.channels);
 
-        const result = await executeTool({ action: "channels" }, ctx());
+        const result = await executeChannelTool({ action: "list" }, ctx());
         assert.ok(result.includes("general"));
     });
 
-    it("joins and leaves topic channels", async () => {
+    it("channel joins and leaves topic channels", async () => {
         mesh = new Mesh({ name: "TestAgent", dir });
         await mesh.join();
         registerAgent("TestAgent", [], mesh.channels);
 
-        const joinResult = await executeTool({ action: "join", channel: "testing" }, ctx());
+        const joinResult = await executeChannelTool({ action: "join", name: "testing" }, ctx());
         assert.ok(joinResult.includes("testing"));
 
-        const leaveResult = await executeTool({ action: "leave", channel: "testing" }, ctx());
+        const leaveResult = await executeChannelTool({ action: "leave", name: "testing" }, ctx());
         assert.ok(leaveResult.includes("Left"));
     });
 
-    it("prevents leaving general", async () => {
+    it("channel prevents leaving general", async () => {
         mesh = new Mesh({ name: "TestAgent", dir });
         await mesh.join();
         registerAgent("TestAgent", [], mesh.channels);
 
-        const result = await executeTool({ action: "leave", channel: "general" }, ctx());
+        const result = await executeChannelTool({ action: "leave", name: "general" }, ctx());
         assert.ok(result.includes("❌"));
     });
 
-    it("sends to a channel", async () => {
+    it("msg sends to a channel", async () => {
         mesh = new Mesh({ name: "TestAgent", dir });
         await mesh.join();
         registerAgent("TestAgent", [], mesh.channels);
 
-        const result = await executeTool({ action: "send", message: "hello world" }, ctx());
+        const result = await executeMsgTool({ message: "hello world" }, ctx());
         assert.ok(result.includes("✅"));
         assert.ok(result.includes("general"));
     });
 
-    it("reserves and releases paths", async () => {
+    it("reserve reserves and releases paths", async () => {
         mesh = new Mesh({ name: "TestAgent", dir });
         await mesh.join();
         registerAgent("TestAgent", [], mesh.channels);
 
-        const reserveResult = await executeTool(
-            { action: "reserve", paths: ["src/auth/"], reason: "Refactoring" },
+        const reserveResult = await executeReserveTool(
+            { paths: ["src/auth/"], reason: "Refactoring" },
             ctx(),
         );
         assert.ok(reserveResult.includes("✅"));
         assert.ok(reserveResult.includes("src/auth/"));
         assert.equal(registry.getAgent("TestAgent")?.reservations.length, 1);
 
-        const releaseResult = await executeTool(
+        const releaseResult = await executeReserveTool(
             { action: "release", paths: ["src/auth/"] },
             ctx(),
         );
@@ -119,7 +124,7 @@ describe("tool", () => {
         assert.equal(registry.getAgent("TestAgent")?.reservations.length, 0);
     });
 
-    it("detects reservation conflicts", async () => {
+    it("reserve detects conflicts", async () => {
         mesh = new Mesh({ name: "TestAgent", dir });
         await mesh.join();
         registerAgent("TestAgent", [], mesh.channels);
@@ -130,25 +135,26 @@ describe("tool", () => {
             timestamp: new Date().toISOString(),
         }]);
 
-        const result = await executeTool(
-            { action: "reserve", paths: ["src/auth/login.ts"] },
+        const result = await executeReserveTool(
+            { paths: ["src/auth/login.ts"] },
             ctx(),
         );
         assert.ok(result.includes("❌"));
         assert.ok(result.includes("OtherAgent"));
+        assert.ok(result.includes("msg({ to: \"OtherAgent\""));
     });
 
-    it("shows status", async () => {
+    it("agent shows status", async () => {
         mesh = new Mesh({ name: "TestAgent", dir });
         await mesh.join();
         registerAgent("TestAgent", [], mesh.channels);
 
-        const result = await executeTool({ action: "status" }, ctx());
+        const result = await executeAgentTool({ action: "status" }, ctx());
         assert.ok(result.includes("TestAgent"));
         assert.ok(result.includes("general"));
     });
 
-    it("shows whois data", async () => {
+    it("agent shows whois data", async () => {
         registerAgent("OtherAgent", [{
             paths: ["src/auth/"],
             reason: "Working",
@@ -156,39 +162,39 @@ describe("tool", () => {
             timestamp: new Date().toISOString(),
         }], ["general", "testing"]);
 
-        const result = await executeTool({ action: "whois", name: "OtherAgent" }, ctx());
+        const result = await executeAgentTool({ action: "whois", name: "OtherAgent" }, ctx());
         assert.ok(result.includes("OtherAgent"));
         assert.ok(result.includes("src/auth/"));
         assert.ok(result.includes("testing"));
     });
 
-    it("handles unknown action", async () => {
-        const result = await executeTool({ action: "nonexistent" }, ctx());
+    it("agent rejects unknown action", async () => {
+        const result = await executeAgentTool({ action: "nonexistent" }, ctx());
         assert.ok(result.includes("❌"));
         assert.ok(result.includes("Unknown action"));
     });
 
-    it("send requires message", async () => {
+    it("msg requires message", async () => {
         mesh = new Mesh({ name: "TestAgent", dir });
         await mesh.join();
         registerAgent("TestAgent", [], mesh.channels);
 
-        const result = await executeTool({ action: "send" }, ctx());
+        const result = await executeMsgTool({}, ctx());
         assert.ok(result.includes("❌"));
     });
 
-    it("DM to offline target returns an error", async () => {
+    it("msg DM to offline target returns an error", async () => {
         mesh = new Mesh({ name: "TestAgent", dir });
         await mesh.join();
         registerAgent("TestAgent", [], mesh.channels);
 
-        const result = await executeTool({ action: "send", to: "Ghost", message: "hello" }, ctx());
+        const result = await executeMsgTool({ to: "Ghost", message: "hello" }, ctx());
         assert.ok(result.includes("❌"));
         assert.ok(result.includes("Cannot reach Ghost"));
     });
 
-    it("spawn without prompt returns error", async () => {
-        const result = await executeTool({ action: "spawn" }, ctx());
+    it("agent spawn without prompt returns error", async () => {
+        const result = await executeAgentTool({ action: "spawn" }, ctx());
         assert.ok(result.includes("❌"));
     });
 });

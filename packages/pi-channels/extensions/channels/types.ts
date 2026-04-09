@@ -51,15 +51,27 @@ export interface RegistryEntry {
     channels: string[];
 }
 
-export interface ToolAction {
-    action: string;
-    channel?: string;
-    to?: string;
+export interface MsgParams {
     message?: string;
-    paths?: string[];
-    reason?: string;
+    to?: string;
+    channel?: string;
+}
+
+export interface AgentParams {
+    action: string;
+    name?: string;
     prompt?: string;
     cwd?: string;
     channels?: string[];
+}
+
+export interface ChannelParams {
+    action: string;
     name?: string;
+}
+
+export interface ReserveParams {
+    action?: string;
+    paths?: string[];
+    reason?: string;
 }
