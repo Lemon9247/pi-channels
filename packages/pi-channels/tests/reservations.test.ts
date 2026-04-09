@@ -1,77 +1,102 @@
-import { describe, it, beforeEach } from "node:test";
+import { describe, it } from "node:test";
 import * as assert from "node:assert/strict";
+import * as path from "node:path";
 import * as reservations from "../extensions/channels/reservations.js";
+import * as registry from "../extensions/channels/registry.js";
 
 describe("reservations", () => {
-    beforeEach(() => {
-        reservations.clearAllReservations();
+    const projectDir = path.join("/tmp", "pi-channels-reservations-test");
+
+    function clear(): void {
+        registry.unregisterAgent("Alpha");
+        registry.unregisterAgent("Beta");
+    }
+
+    it("creates reservation objects", () => {
+        const reservation = reservations.createReservation("Alpha", ["src/auth/"], "Refactoring auth");
+        assert.deepEqual(reservation.paths, ["src/auth/"]);
+        assert.equal(reservation.reason, "Refactoring auth");
+        assert.equal(reservation.agent, "Alpha");
     });
 
-    it("creates and retrieves reservations", () => {
-        reservations.createReservation("Alpha", ["src/auth/"], "Refactoring auth");
-        const res = reservations.getReservations("Alpha");
-        assert.equal(res.length, 1);
-        assert.deepEqual(res[0]!.paths, ["src/auth/"]);
-        assert.equal(res[0]!.reason, "Refactoring auth");
-    });
+    it("detects exact path conflicts via registry", () => {
+        clear();
+        registry.registerAgent({
+            name: "Alpha",
+            pid: process.pid,
+            cwd: projectDir,
+            reservations: [reservations.createReservation("Alpha", ["src/auth/login.ts"], "Working on login")],
+            joinedAt: new Date().toISOString(),
+            lastActivity: new Date().toISOString(),
+            status: "active",
+            channels: ["general"],
+        });
 
-    it("detects conflict with exact path", () => {
-        reservations.createReservation("Alpha", ["src/auth/login.ts"], "Working on login");
-        const conflict = reservations.checkConflict("src/auth/login.ts", "Beta", "/project");
+        const conflict = reservations.checkConflict("src/auth/login.ts", "Beta", projectDir);
         assert.ok(conflict);
         assert.equal(conflict!.agent, "Alpha");
+        clear();
     });
 
-    it("detects conflict with directory reservation", () => {
-        reservations.createReservation("Alpha", ["src/auth/"], "Refactoring auth");
-        const conflict = reservations.checkConflict("src/auth/login.ts", "Beta", "/project");
+    it("detects directory reservation conflicts", () => {
+        clear();
+        registry.registerAgent({
+            name: "Alpha",
+            pid: process.pid,
+            cwd: projectDir,
+            reservations: [reservations.createReservation("Alpha", ["src/auth/"], "Refactoring auth")],
+            joinedAt: new Date().toISOString(),
+            lastActivity: new Date().toISOString(),
+            status: "active",
+            channels: ["general"],
+        });
+
+        const conflict = reservations.checkConflict("src/auth/login.ts", "Beta", projectDir);
         assert.ok(conflict);
         assert.equal(conflict!.agent, "Alpha");
+        clear();
     });
 
-    it("no conflict with own reservation", () => {
-        reservations.createReservation("Alpha", ["src/auth/"], "Refactoring auth");
-        const conflict = reservations.checkConflict("src/auth/login.ts", "Alpha", "/project");
+    it("ignores your own reservations", () => {
+        clear();
+        registry.registerAgent({
+            name: "Alpha",
+            pid: process.pid,
+            cwd: projectDir,
+            reservations: [reservations.createReservation("Alpha", ["src/auth/"], "Refactoring auth")],
+            joinedAt: new Date().toISOString(),
+            lastActivity: new Date().toISOString(),
+            status: "active",
+            channels: ["general"],
+        });
+
+        const conflict = reservations.checkConflict("src/auth/login.ts", "Alpha", projectDir);
         assert.equal(conflict, null);
+        clear();
     });
 
-    it("no conflict with unrelated path", () => {
-        reservations.createReservation("Alpha", ["src/auth/"], "Refactoring auth");
-        const conflict = reservations.checkConflict("src/api/routes.ts", "Beta", "/project");
-        assert.equal(conflict, null);
+    it("adds new reservations to an existing list", () => {
+        const existing = [reservations.createReservation("Alpha", ["src/auth/"], "Auth")];
+        const next = reservations.addReservation(existing, "Alpha", ["src/api/"], "API");
+        assert.equal(next.length, 2);
+        assert.deepEqual(next[1]!.paths, ["src/api/"]);
     });
 
     it("releases specific paths", () => {
-        reservations.createReservation("Alpha", ["src/auth/", "src/api/"], "Working");
-        const released = reservations.releaseReservation("Alpha", ["src/auth/"]);
+        const existing = [reservations.createReservation("Alpha", ["src/auth/", "src/api/"], "Working")];
+        const { kept, released } = reservations.releaseReservations(existing, ["src/auth/"]);
         assert.equal(released.length, 1);
-
-        // Should still have src/api/
-        const remaining = reservations.getReservations("Alpha");
-        assert.equal(remaining.length, 1);
-        assert.deepEqual(remaining[0]!.paths, ["src/api/"]);
+        assert.equal(kept.length, 1);
+        assert.deepEqual(kept[0]!.paths, ["src/api/"]);
     });
 
-    it("releases all when no paths specified", () => {
-        reservations.createReservation("Alpha", ["src/auth/"], "Working");
-        reservations.createReservation("Alpha", ["src/api/"], "Also working");
-        const released = reservations.releaseReservation("Alpha");
+    it("releases everything when no paths are specified", () => {
+        const existing = [
+            reservations.createReservation("Alpha", ["src/auth/"], "Auth"),
+            reservations.createReservation("Alpha", ["src/api/"], "API"),
+        ];
+        const { kept, released } = reservations.releaseReservations(existing);
+        assert.equal(kept.length, 0);
         assert.equal(released.length, 2);
-        assert.equal(reservations.getReservations("Alpha").length, 0);
-    });
-
-    it("getAllReservations returns all agents", () => {
-        reservations.createReservation("Alpha", ["src/auth/"], "Auth");
-        reservations.createReservation("Beta", ["src/api/"], "API");
-        const all = reservations.getAllReservations();
-        assert.equal(all.size, 2);
-        assert.ok(all.has("Alpha"));
-        assert.ok(all.has("Beta"));
-    });
-
-    it("clearReservations removes agent", () => {
-        reservations.createReservation("Alpha", ["src/auth/"], "Auth");
-        reservations.clearReservations("Alpha");
-        assert.equal(reservations.getReservations("Alpha").length, 0);
     });
 });

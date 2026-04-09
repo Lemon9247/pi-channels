@@ -1,55 +1,35 @@
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
-import * as path from "node:path";
 import * as os from "node:os";
+import * as path from "node:path";
 import { type ChannelsConfig, DEFAULT_CONFIG } from "./types.js";
 
 const GLOBAL_CONFIG_PATH = path.join(os.homedir(), ".pi", "agent", "channels.json");
-const PROJECT_CONFIG_NAME = path.join(".pi", "channels.json");
+const PROJECT_CONFIG_DIR = path.join(os.homedir(), ".pi", "agent", "channels", "projects");
+const LEGACY_PROJECT_CONFIG_NAME = path.join(".pi", "channels.json");
 
-/**
- * Load config with project overriding global overriding defaults.
- */
 export function loadConfig(projectDir?: string): ChannelsConfig {
     const global = readJsonSafe(GLOBAL_CONFIG_PATH);
     validateConfig(global);
-    const project = projectDir ? readJsonSafe(path.join(projectDir, PROJECT_CONFIG_NAME)) : {};
+
+    const legacyProject = projectDir
+        ? readJsonSafe(path.join(projectDir, LEGACY_PROJECT_CONFIG_NAME))
+        : {};
+    validateConfig(legacyProject);
+
+    const project = projectDir ? readJsonSafe(projectConfigPath(projectDir)) : {};
     validateConfig(project);
-    return { ...DEFAULT_CONFIG, ...global, ...project };
+
+    return { ...DEFAULT_CONFIG, ...global, ...legacyProject, ...project };
 }
 
-/**
- * Save a key/value pair to project config (or global if no projectDir).
- */
-export function saveConfigValue(
-    key: string,
-    value: unknown,
-    projectDir?: string,
-): void {
-    const configPath = projectDir
-        ? path.join(projectDir, PROJECT_CONFIG_NAME)
-        : GLOBAL_CONFIG_PATH;
-
-    const existing = readJsonSafe(configPath);
-    (existing as Record<string, unknown>)[key] = value;
-
-    const dir = path.dirname(configPath);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(configPath, JSON.stringify(existing, null, 2) + "\n");
-}
-
-/**
- * Check if auto-registration should be enabled for the given cwd.
- */
 export function shouldAutoRegister(config: ChannelsConfig, cwd: string): boolean {
     if (config.autoRegister) return true;
     if (process.env.PI_CHANNELS_AUTO_REGISTER === "1") return true;
 
-    const expandedPaths = config.autoRegisterPaths.map((p) =>
-        p.replace(/^~/, os.homedir()),
-    );
+    const expandedPaths = config.autoRegisterPaths.map((value) => value.replace(/^~/, os.homedir()));
 
     for (const pattern of expandedPaths) {
-        // Simple glob: trailing /* matches any subdirectory
         if (pattern.endsWith("/*")) {
             const base = pattern.slice(0, -2);
             if (cwd.startsWith(base)) return true;
@@ -61,6 +41,14 @@ export function shouldAutoRegister(config: ChannelsConfig, cwd: string): boolean
     return false;
 }
 
+export function projectConfigPath(projectDir: string): string {
+    return path.join(PROJECT_CONFIG_DIR, `${folderHash(projectDir)}.json`);
+}
+
+export function folderHash(projectDir: string): string {
+    return crypto.createHash("sha256").update(projectDir).digest("hex").slice(0, 12);
+}
+
 function readJsonSafe(filepath: string): Record<string, unknown> {
     try {
         const raw = fs.readFileSync(filepath, "utf-8");
@@ -69,18 +57,15 @@ function readJsonSafe(filepath: string): Record<string, unknown> {
             return parsed;
         }
     } catch {
-        // File doesn't exist or invalid JSON
+        // Missing file or bad JSON.
     }
     return {};
 }
 
-/**
- * Validate config keys and warn on unknown ones.
- */
 function validateConfig(partial: Record<string, unknown>): void {
-    const validKeys = Object.keys(DEFAULT_CONFIG);
+    const validKeys = new Set(Object.keys(DEFAULT_CONFIG));
     for (const key of Object.keys(partial)) {
-        if (!validKeys.includes(key)) {
+        if (!validKeys.has(key)) {
             console.warn(`[pi-channels] Unknown config key "${key}" — ignoring.`);
         }
     }

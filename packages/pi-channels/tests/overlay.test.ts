@@ -22,22 +22,21 @@ describe("overlay", () => {
         }, "TestAgent");
 
         assert.equal(state.messages.length, 1);
-        // Not visible, so should have unread
         assert.equal(overlay.getTotalUnread(state), 1);
     });
 
-    it("clears unread when focused", () => {
+    it("tracks DM unread separately", () => {
         const state = overlay.createOverlayState();
         overlay.addMessage(state, {
             timestamp: new Date(),
             from: "Alpha",
-            text: "hello",
-            channel: "general",
-            isDM: false,
+            text: "psst",
+            channel: "dm",
+            isDM: true,
         }, "TestAgent");
 
-        state.visible = true;
-        state.focusedChannel = "general";
+        assert.equal(overlay.getTotalUnread(state), 1);
+        state.focusedChannel = "dm";
         overlay.clearFocusedUnread(state);
         assert.equal(overlay.getTotalUnread(state), 0);
     });
@@ -54,10 +53,10 @@ describe("overlay", () => {
         overlay.cycleChannel(state, channels);
         assert.equal(state.focusedChannel, "dm");
         overlay.cycleChannel(state, channels);
-        assert.equal(state.focusedChannel, "all"); // wraps around
+        assert.equal(state.focusedChannel, "all");
     });
 
-    it("filters visible messages by channel", () => {
+    it("filters visible messages by current focus", () => {
         const state = overlay.createOverlayState();
         overlay.addMessage(state, {
             timestamp: new Date(),
@@ -73,62 +72,39 @@ describe("overlay", () => {
             channel: "testing",
             isDM: false,
         }, "TestAgent");
+        overlay.addMessage(state, {
+            timestamp: new Date(),
+            from: "Gamma",
+            text: "in dm",
+            channel: "dm",
+            isDM: true,
+        }, "TestAgent");
 
-        // All
-        assert.equal(overlay.getVisibleMessages(state).length, 2);
-
-        // Filter to testing
+        assert.equal(overlay.getVisibleMessages(state).length, 3);
         state.focusedChannel = "testing";
-        const visible = overlay.getVisibleMessages(state);
-        assert.equal(visible.length, 1);
-        assert.equal(visible[0]!.text, "on testing");
+        assert.equal(overlay.getVisibleMessages(state).length, 1);
+        state.focusedChannel = "dm";
+        assert.equal(overlay.getVisibleMessages(state).length, 1);
     });
 
-    it("renders status bar", () => {
-        const bar = overlay.renderStatusBar("CozyBadger", 3, 2);
-        assert.ok(bar.includes("CozyBadger"));
-        assert.ok(bar.includes("3 peers"));
-        assert.ok(bar.includes("2 unread"));
+    it("stores and navigates message history", () => {
+        const state = overlay.createOverlayState();
+        overlay.addToHistory(state, "first");
+        overlay.addToHistory(state, "second");
+
+        assert.equal(overlay.navigateHistory(state, -1), "second");
+        assert.equal(overlay.navigateHistory(state, -1), "first");
+        assert.equal(overlay.navigateHistory(state, 1), "second");
     });
 
-    it("renders status bar without unread", () => {
-        const bar = overlay.renderStatusBar("CozyBadger", 1, 0);
-        assert.ok(!bar.includes("unread"));
-    });
-
-    it("parseInput detects DM", () => {
+    it("parseInput detects DMs", () => {
         const result = overlay.parseInput("@Alpha hello there");
         assert.deepEqual(result, { type: "dm", target: "Alpha", message: "hello there" });
     });
 
-    it("parseInput detects channel message", () => {
+    it("parseInput detects channel messages", () => {
         const result = overlay.parseInput("hello everyone");
         assert.deepEqual(result, { type: "channel", message: "hello everyone" });
-    });
-
-    it("renders overlay string", () => {
-        const state = overlay.createOverlayState();
-        state.visible = true;
-        overlay.addMessage(state, {
-            timestamp: new Date(),
-            from: "Alpha",
-            text: "hello",
-            channel: "general",
-            isDM: false,
-        }, "TestAgent");
-
-        const rendered = overlay.renderOverlay(state, {
-            width: 60,
-            height: 15,
-            agentName: "Beta",
-            members: ["Alpha", "Beta"],
-            channels: ["general"],
-            projectName: "my-project",
-        });
-
-        assert.ok(rendered.includes("my-project"));
-        assert.ok(rendered.includes("Alpha"));
-        assert.ok(rendered.includes("hello"));
     });
 
     it("caps messages at maxMessages", () => {
@@ -146,6 +122,6 @@ describe("overlay", () => {
         }
 
         assert.equal(state.messages.length, 5);
-        assert.equal(state.messages[0]!.text, "msg 5"); // oldest kept
+        assert.equal(state.messages[0]!.text, "msg 5");
     });
 });

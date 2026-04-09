@@ -6,14 +6,10 @@ import * as path from "node:path";
 import { Mesh } from "agent-channels";
 import { executeTool } from "../extensions/channels/tool.js";
 import { DEFAULT_CONFIG } from "../extensions/channels/types.js";
-import * as reservations from "../extensions/channels/reservations.js";
+import * as registry from "../extensions/channels/registry.js";
 
 function tmpDir(): string {
     return fs.mkdtempSync(path.join(os.tmpdir(), "tool-test-"));
-}
-
-function wait(ms: number): Promise<void> {
-    return new Promise((r) => setTimeout(r, ms));
 }
 
 describe("tool", () => {
@@ -24,7 +20,6 @@ describe("tool", () => {
     beforeEach(() => {
         dir = tmpDir();
         projectDir = tmpDir();
-        reservations.clearAllReservations();
     });
 
     afterEach(async () => {
@@ -32,6 +27,8 @@ describe("tool", () => {
             await mesh.leave();
             mesh = null;
         }
+        registry.unregisterAgent("TestAgent");
+        registry.unregisterAgent("OtherAgent");
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
         try { fs.rmSync(projectDir, { recursive: true, force: true }); } catch { /* ignore */ }
     });
@@ -43,7 +40,20 @@ describe("tool", () => {
         projectDir,
     });
 
-    it("returns error when mesh not connected", async () => {
+    function registerAgent(name: string, reservations: any[] = [], channels: string[] = ["general"]): void {
+        registry.registerAgent({
+            name,
+            pid: process.pid,
+            cwd: projectDir,
+            reservations,
+            joinedAt: new Date().toISOString(),
+            lastActivity: new Date().toISOString(),
+            status: "active",
+            channels,
+        });
+    }
+
+    it("returns error when mesh is not connected", async () => {
         const result = await executeTool({ action: "send", message: "hi" }, ctx());
         assert.ok(result.includes("❌"));
     });
@@ -51,6 +61,7 @@ describe("tool", () => {
     it("lists channels", async () => {
         mesh = new Mesh({ name: "TestAgent", dir });
         await mesh.join();
+        registerAgent("TestAgent", [], mesh.channels);
 
         const result = await executeTool({ action: "channels" }, ctx());
         assert.ok(result.includes("general"));
@@ -59,39 +70,30 @@ describe("tool", () => {
     it("joins and leaves topic channels", async () => {
         mesh = new Mesh({ name: "TestAgent", dir });
         await mesh.join();
+        registerAgent("TestAgent", [], mesh.channels);
 
-        const joinResult = await executeTool(
-            { action: "join", channel: "testing" },
-            ctx(),
-        );
+        const joinResult = await executeTool({ action: "join", channel: "testing" }, ctx());
         assert.ok(joinResult.includes("testing"));
 
-        const leaveResult = await executeTool(
-            { action: "leave", channel: "testing" },
-            ctx(),
-        );
+        const leaveResult = await executeTool({ action: "leave", channel: "testing" }, ctx());
         assert.ok(leaveResult.includes("Left"));
     });
 
     it("prevents leaving general", async () => {
         mesh = new Mesh({ name: "TestAgent", dir });
         await mesh.join();
+        registerAgent("TestAgent", [], mesh.channels);
 
-        const result = await executeTool(
-            { action: "leave", channel: "general" },
-            ctx(),
-        );
+        const result = await executeTool({ action: "leave", channel: "general" }, ctx());
         assert.ok(result.includes("❌"));
     });
 
-    it("sends to channel", async () => {
+    it("sends to a channel", async () => {
         mesh = new Mesh({ name: "TestAgent", dir });
         await mesh.join();
+        registerAgent("TestAgent", [], mesh.channels);
 
-        const result = await executeTool(
-            { action: "send", message: "hello world" },
-            ctx(),
-        );
+        const result = await executeTool({ action: "send", message: "hello world" }, ctx());
         assert.ok(result.includes("✅"));
         assert.ok(result.includes("general"));
     });
@@ -99,6 +101,7 @@ describe("tool", () => {
     it("reserves and releases paths", async () => {
         mesh = new Mesh({ name: "TestAgent", dir });
         await mesh.join();
+        registerAgent("TestAgent", [], mesh.channels);
 
         const reserveResult = await executeTool(
             { action: "reserve", paths: ["src/auth/"], reason: "Refactoring" },
@@ -106,20 +109,26 @@ describe("tool", () => {
         );
         assert.ok(reserveResult.includes("✅"));
         assert.ok(reserveResult.includes("src/auth/"));
+        assert.equal(registry.getAgent("TestAgent")?.reservations.length, 1);
 
         const releaseResult = await executeTool(
             { action: "release", paths: ["src/auth/"] },
             ctx(),
         );
         assert.ok(releaseResult.includes("✅"));
+        assert.equal(registry.getAgent("TestAgent")?.reservations.length, 0);
     });
 
     it("detects reservation conflicts", async () => {
         mesh = new Mesh({ name: "TestAgent", dir });
         await mesh.join();
-
-        // Someone else has a reservation
-        reservations.createReservation("OtherAgent", ["src/auth/"], "Working on auth");
+        registerAgent("TestAgent", [], mesh.channels);
+        registerAgent("OtherAgent", [{
+            paths: ["src/auth/"],
+            reason: "Working on auth",
+            agent: "OtherAgent",
+            timestamp: new Date().toISOString(),
+        }]);
 
         const result = await executeTool(
             { action: "reserve", paths: ["src/auth/login.ts"] },
@@ -132,20 +141,25 @@ describe("tool", () => {
     it("shows status", async () => {
         mesh = new Mesh({ name: "TestAgent", dir });
         await mesh.join();
+        registerAgent("TestAgent", [], mesh.channels);
 
         const result = await executeTool({ action: "status" }, ctx());
         assert.ok(result.includes("TestAgent"));
         assert.ok(result.includes("general"));
     });
 
-    it("shows feed", async () => {
-        // Write some feed events
-        const feedModule = await import("../extensions/channels/feed.js");
-        feedModule.appendEvent(projectDir, "join", "Alpha", "Joined");
+    it("shows whois data", async () => {
+        registerAgent("OtherAgent", [{
+            paths: ["src/auth/"],
+            reason: "Working",
+            agent: "OtherAgent",
+            timestamp: new Date().toISOString(),
+        }], ["general", "testing"]);
 
-        const result = await executeTool({ action: "feed" }, ctx());
-        assert.ok(result.includes("Alpha"));
-        assert.ok(result.includes("join"));
+        const result = await executeTool({ action: "whois", name: "OtherAgent" }, ctx());
+        assert.ok(result.includes("OtherAgent"));
+        assert.ok(result.includes("src/auth/"));
+        assert.ok(result.includes("testing"));
     });
 
     it("handles unknown action", async () => {
@@ -154,15 +168,11 @@ describe("tool", () => {
         assert.ok(result.includes("Unknown action"));
     });
 
-    it("config.show returns config", async () => {
-        const result = await executeTool({ action: "config.show" }, ctx());
-        assert.ok(result.includes("chattiness"));
-        assert.ok(result.includes("normal"));
-    });
-
     it("send requires message", async () => {
         mesh = new Mesh({ name: "TestAgent", dir });
         await mesh.join();
+        registerAgent("TestAgent", [], mesh.channels);
+
         const result = await executeTool({ action: "send" }, ctx());
         assert.ok(result.includes("❌"));
     });
