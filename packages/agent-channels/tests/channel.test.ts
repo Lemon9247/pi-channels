@@ -129,6 +129,24 @@ describe("Channel", () => {
         assert.equal(beta.joined, true);
     });
 
+    it("delivers queued messages to a late joiner", async () => {
+        const alpha = new Channel({ path: path.join(dir, "general.sock"), name: "Alpha" });
+        const beta = new Channel({ path: path.join(dir, "general.sock"), name: "Beta" });
+        cleanups.push(() => beta.leave());
+        cleanups.push(() => alpha.leave());
+
+        await alpha.join();
+        alpha.send({ msg: "queued while alone" });
+
+        await beta.join();
+
+        const received: string[] = [];
+        beta.on("message", (msg) => received.push(msg.msg));
+        await wait(100);
+
+        assert.ok(received.includes("queued while alone"));
+    });
+
     it("cleans stale sockets on join", async () => {
         const socketPath = path.join(dir, "general.sock");
         fs.writeFileSync(socketPath, "stale");

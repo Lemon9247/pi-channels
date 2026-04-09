@@ -177,6 +177,16 @@ describe("tool", () => {
         assert.ok(result.includes("❌"));
     });
 
+    it("DM to offline target returns an error", async () => {
+        mesh = new Mesh({ name: "TestAgent", dir });
+        await mesh.join();
+        registerAgent("TestAgent", [], mesh.channels);
+
+        const result = await executeTool({ action: "send", to: "Ghost", message: "hello" }, ctx());
+        assert.ok(result.includes("❌"));
+        assert.ok(result.includes("Cannot reach Ghost"));
+    });
+
     it("spawn without prompt returns error", async () => {
         const result = await executeTool({ action: "spawn" }, ctx());
         assert.ok(result.includes("❌"));

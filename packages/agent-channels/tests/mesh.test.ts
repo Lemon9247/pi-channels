@@ -156,12 +156,12 @@ describe("Mesh", () => {
         assert.ok(mesh.channels.includes("general"));
     });
 
-    it("sendTo succeeds even if target is offline", async () => {
+    it("sendTo rejects when target is offline", async () => {
         const mesh = new Mesh({ name: "Alpha", dir });
         cleanups.push(() => mesh.leave());
 
         await mesh.join();
-        await assert.doesNotReject(() => mesh.sendTo("Ghost", "hello"));
+        await assert.rejects(() => mesh.sendTo("Ghost", "hello"), /Cannot reach Ghost/);
     });
 
     it("send to unjoined channel throws", async () => {

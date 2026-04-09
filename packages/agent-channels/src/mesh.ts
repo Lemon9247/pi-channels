@@ -131,6 +131,7 @@ export class Mesh extends EventEmitter {
         const existing = this.channelMap.get(channelName);
 
         if (existing) {
+            await this.ensureDmTargetPresent(existing, target);
             existing.send({
                 msg: message,
                 data: { type: "dm", from: sender, to: target, channel: channelName },
@@ -146,6 +147,7 @@ export class Mesh extends EventEmitter {
 
         try {
             await temp.join();
+            await this.ensureDmTargetPresent(temp, target);
             temp.send({
                 msg: message,
                 data: { type: "dm", from: sender, to: target, channel: channelName },
@@ -195,6 +197,17 @@ export class Mesh extends EventEmitter {
 
     private publicChannelName(channelName: string): string {
         return isDmChannel(channelName) ? "dm" : channelName;
+    }
+
+    private async ensureDmTargetPresent(channel: Channel, target: string): Promise<void> {
+        for (let attempt = 0; attempt < 5; attempt++) {
+            if (channel.members.includes(target)) {
+                return;
+            }
+            await wait(25);
+        }
+
+        throw new Error(`Cannot reach ${target} — they may be offline`);
     }
 }
 
